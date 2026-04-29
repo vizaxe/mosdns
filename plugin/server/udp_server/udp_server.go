@@ -25,9 +25,7 @@ import (
 	"go.uber.org/zap"
 	"net"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/server"
@@ -51,13 +49,17 @@ func (a *Args) init() {
 }
 
 type UdpServer struct {
-	args *Args
-
-	c net.PacketConn
+	args       *Args
+	c          net.PacketConn
+	listenPath string
 }
 
 func (s *UdpServer) Close() error {
-	return s.c.Close()
+	err := s.c.Close()
+	if len(s.listenPath) > 0 {
+		os.Remove(s.listenPath)
+	}
+	return err
 }
 
 func Init(bp *coremain.BP, args any) (any, error) {
@@ -75,22 +77,17 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 		listenerNetwork = "unixgram"
 	}
 
+	var listenPath string
+	if listenerNetwork == "unixgram" && strings.HasPrefix(args.Listen, "/") {
+		listenPath = args.Listen
+		os.Remove(listenPath)
+	}
+
 	socketOpt := server_utils.ListenerSocketOpts{
 		SO_REUSEPORT: true,
 		SO_RCVBUF:    64 * 1024,
 	}
 	lc := net.ListenConfig{Control: server_utils.ListenerControl(socketOpt)}
-
-	if listenerNetwork == "unixgram" {
-		// 清理sockfile
-		os.Remove(args.Listen)
-		s := make(chan os.Signal, 1)
-		signal.Notify(s, os.Interrupt, syscall.SIGTERM)
-		go func() {
-			<-s
-			os.Remove(args.Listen)
-		}()
-	}
 
 	c, err := lc.ListenPacket(context.Background(), listenerNetwork, args.Listen)
 	if err != nil {
@@ -108,7 +105,8 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 		bp.M().GetSafeClose().SendCloseSignal(err)
 	}()
 	return &UdpServer{
-		args: args,
-		c:    c,
+		args:       args,
+		c:          c,
+		listenPath: listenPath,
 	}, nil
 }

@@ -15,8 +15,10 @@ func ListenerControl(opt ListenerSocketOpts) ControlFunc {
 			errSyscall error
 		)
 
+		isUnix := network == "unix" || network == "unixgram"
+
 		errControl = c.Control(func(fd uintptr) {
-			if opt.SO_REUSEPORT {
+			if opt.SO_REUSEPORT && !isUnix {
 				errSyscall = unix.SetsockoptInt(int(fd), unix.SOL_SOCKET, unix.SO_REUSEPORT, 1)
 				if errSyscall != nil {
 					return

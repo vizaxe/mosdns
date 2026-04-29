@@ -28,6 +28,7 @@ import (
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/data_provider/ip_set"
 
 	// matcher
+	_ "github.com/IrineSistiana/mosdns/v5/plugin/matcher/client_interface"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/matcher/client_ip"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/matcher/cname"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/matcher/env"

@@ -25,9 +25,7 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
@@ -61,13 +59,17 @@ func (a *Args) init() {
 }
 
 type HttpServer struct {
-	args *Args
-
-	server *http.Server
+	args       *Args
+	server     *http.Server
+	listenPath string
 }
 
 func (s *HttpServer) Close() error {
-	return s.server.Close()
+	err := s.server.Close()
+	if len(s.listenPath) > 0 {
+		os.Remove(s.listenPath)
+	}
+	return err
 }
 
 func Init(bp *coremain.BP, args any) (any, error) {
@@ -102,21 +104,18 @@ func StartServer(bp *coremain.BP, args *Args) (*HttpServer, error) {
 	if strings.HasPrefix(args.Listen, "/") {
 		listenerNetwork = "unix"
 	}
+
+	var listenPath string
+	if listenerNetwork == "unix" && strings.HasPrefix(args.Listen, "/") {
+		listenPath = args.Listen
+		os.Remove(listenPath)
+	}
+
 	l, err := lc.Listen(context.Background(), listenerNetwork, args.Listen)
 	if err != nil {
 		return nil, fmt.Errorf("failed to listen socket, %w", err)
 	}
 	bp.L().Info("http server started", zap.Stringer("addr", l.Addr()))
-
-	if listenerNetwork == "unix" {
-		// 清理sockfile
-		s := make(chan os.Signal, 1)
-		signal.Notify(s, os.Interrupt, syscall.SIGTERM)
-		go func() {
-			<-s
-			os.Remove(args.Listen)
-		}()
-	}
 
 	hs := &http.Server{
 		Handler:        mux,
@@ -143,7 +142,8 @@ func StartServer(bp *coremain.BP, args *Args) (*HttpServer, error) {
 		bp.M().GetSafeClose().SendCloseSignal(err)
 	}()
 	return &HttpServer{
-		args:   args,
-		server: hs,
+		args:       args,
+		server:     hs,
+		listenPath: listenPath,
 	}, nil
 }
