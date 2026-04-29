@@ -22,7 +22,6 @@ package memory_cache
 import (
 	"github.com/IrineSistiana/mosdns/v5/pkg/utils"
 	"github.com/miekg/dns"
-	"golang.org/x/exp/constraints"
 	"hash/maphash"
 )
 
@@ -63,58 +62,9 @@ func getMsgKey(q *dns.Msg) string {
 		b = b | doBit
 	}
 	buf[0] = b
-	buf[1] = byte(question.Qtype << 8)
+	buf[1] = byte(question.Qtype >> 8)
 	buf[2] = byte(question.Qtype)
 	buf[3] = byte(len(question.Name))
 	copy(buf[4:], question.Name)
 	return utils.BytesToStringUnsafe(buf)
-}
-
-func copyNoOpt(m *dns.Msg) *dns.Msg {
-	if m == nil {
-		return nil
-	}
-
-	m2 := new(dns.Msg)
-	m2.MsgHdr = m.MsgHdr
-	m2.Compress = m.Compress
-
-	if len(m.Question) > 0 {
-		m2.Question = make([]dns.Question, len(m.Question))
-		copy(m2.Question, m.Question)
-	}
-
-	lenExtra := len(m.Extra)
-	for _, r := range m.Extra {
-		if r.Header().Rrtype == dns.TypeOPT {
-			lenExtra--
-		}
-	}
-
-	s := make([]dns.RR, len(m.Answer)+len(m.Ns)+lenExtra)
-	m2.Answer, s = s[:0:len(m.Answer)], s[len(m.Answer):]
-	m2.Ns, s = s[:0:len(m.Ns)], s[len(m.Ns):]
-	m2.Extra = s[:0:lenExtra]
-
-	for _, r := range m.Answer {
-		m2.Answer = append(m2.Answer, dns.Copy(r))
-	}
-	for _, r := range m.Ns {
-		m2.Ns = append(m2.Ns, dns.Copy(r))
-	}
-
-	for _, r := range m.Extra {
-		if r.Header().Rrtype == dns.TypeOPT {
-			continue
-		}
-		m2.Extra = append(m2.Extra, dns.Copy(r))
-	}
-	return m2
-}
-
-func min[T constraints.Ordered](a, b T) T {
-	if a < b {
-		return a
-	}
-	return b
 }

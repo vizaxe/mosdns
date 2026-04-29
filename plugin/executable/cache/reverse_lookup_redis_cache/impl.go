@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
 	"github.com/IrineSistiana/mosdns/v5/pkg/dnsutils"
+	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache"
 	"github.com/miekg/dns"
 	"net"
 	"strings"
@@ -38,7 +39,7 @@ func (c *ReverseLookupRedisCache) QueryDns(q *dns.Msg) (*dns.Msg, bool) {
 	ptr := c.Get(cache_backend.StringKey(q.Question[0].Name))
 	if len(ptr) > 0 {
 		r := new(dns.Msg)
-		setDefaultVal(r)
+		cache.SetDefaultVal(r)
 		r.SetReply(q)
 		r.Answer = append(r.Answer, &dns.PTR{
 			Hdr: dns.RR_Header{

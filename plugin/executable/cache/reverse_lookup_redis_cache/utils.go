@@ -22,7 +22,6 @@ package reverse_lookup_redis_cache
 import (
 	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
-	"github.com/miekg/dns"
 	"strings"
 )
 
@@ -34,24 +33,6 @@ func getMsgKey(addr string, separator string, prefix string) cache_backend.Strin
 	} else {
 		return cache_backend.StringKey(fmt.Sprintf("%s", addr))
 	}
-}
-
-func setDefaultVal(m *dns.Msg) *dns.Msg {
-	if m == nil {
-		return nil
-	}
-
-	if m.Answer == nil {
-		m.Answer = make([]dns.RR, 0)
-	}
-	if m.Ns == nil {
-		m.Ns = make([]dns.RR, 0)
-	}
-	if m.Extra == nil {
-		m.Extra = make([]dns.RR, 0)
-	}
-
-	return m
 }
 
 //func (c *ReverseLookupRedisCache) GetPtr(q *dns.Msg) (string, bool) {

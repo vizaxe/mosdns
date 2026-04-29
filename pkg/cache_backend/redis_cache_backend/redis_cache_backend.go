@@ -25,11 +25,15 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
+	"sync"
 	"sync/atomic"
 	"time"
 )
 
-var backends = make(map[string]*redis.Client)
+var (
+	backends   = make(map[string]*redis.Client)
+	backendsMu sync.Mutex
+)
 
 var nopLogger = zap.NewNop()
 
@@ -43,25 +47,29 @@ type RedisCache[K cache_backend.StringKey, V string] struct {
 }
 
 func NewRedisCache[K cache_backend.StringKey, V string](addr string) (*RedisCache[K, V], error) {
-	var client = backends[addr]
-	if client == nil {
+	backendsMu.Lock()
+	client, ok := backends[addr]
+	if !ok {
 		opt, err := redis.ParseURL(addr)
 		if err != nil {
+			backendsMu.Unlock()
 			return nil, fmt.Errorf("invalid redis url, %w", err)
 		}
 		opt.MaxRetries = -1
 		client = redis.NewClient(opt)
 		backends[addr] = client
 	}
+	backendsMu.Unlock()
 	return &RedisCache[K, V]{
 		addr:   addr,
 		client: client,
 	}, nil
 }
 
-// Close closes the inner cleaner of this cache.
 func (c *RedisCache[K, V]) Close() error {
+	backendsMu.Lock()
 	delete(backends, c.addr)
+	backendsMu.Unlock()
 	err := c.client.Close()
 	c.closed.Store(true)
 	return err

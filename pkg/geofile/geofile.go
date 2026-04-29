@@ -1,126 +1,99 @@
-/**
-https://github.com/XTLS/Xray-core/blob/main/infra/conf/router.go
-*/
-
 package geofile
 
 import (
-	"github.com/xtls/xray-core/app/router"
-	"github.com/xtls/xray-core/common/buf"
-	"google.golang.org/protobuf/proto"
+	"bufio"
+	"encoding/binary"
+	"fmt"
 	"io"
 	"os"
-	"runtime/debug"
 	"strings"
 )
 
-func LoadIP(file, code string) ([]*router.CIDR, error) {
-	//bs, err := readAsset(file)
-	bs, err := readAssetByCache(file)
+const maxEntrySize = 20 << 20 // 20MB, safe upper bound for a single entry
+
+func LoadIP(file, code string) ([]*CIDR, error) {
+	entry, err := findEntry(file, []byte(strings.ToUpper(code)))
 	if err != nil {
 		return nil, err
 	}
-	bs = find(bs, []byte(strings.ToUpper(code)))
-	if bs == nil {
+	geoip, err := unmarshalGeoIP(entry)
+	if err != nil {
 		return nil, err
 	}
-	var geoip router.GeoIP
-	if err := proto.Unmarshal(bs, &geoip); err != nil {
-		return nil, err
-	}
-	defer debug.FreeOSMemory()
 	return geoip.Cidr, nil
 }
 
-func LoadSite(file, code string) ([]*router.Domain, error) {
-	//bs, err := readAsset(file)
-	bs, err := readAssetByCache(file)
+func LoadSite(file, code string) ([]*Domain, error) {
+	entry, err := findEntry(file, []byte(strings.ToUpper(code)))
 	if err != nil {
 		return nil, err
 	}
-	bs = find(bs, []byte(strings.ToUpper(code)))
-	if bs == nil {
+	geosite, err := unmarshalGeoSite(entry)
+	if err != nil {
 		return nil, err
 	}
-	var geosite router.GeoSite
-	if err := proto.Unmarshal(bs, &geosite); err != nil {
-		return nil, err
-	}
-	defer debug.FreeOSMemory()
 	return geosite.Domain, nil
 }
 
-type fileReaderFunc func(path string) (io.ReadCloser, error)
-
-var newFileReader fileReaderFunc = func(path string) (io.ReadCloser, error) {
-	return os.Open(path)
-}
-
-func readFile(path string) ([]byte, error) {
-	reader, err := newFileReader(path)
+func findEntry(file string, code []byte) ([]byte, error) {
+	f, err := os.Open(file)
 	if err != nil {
 		return nil, err
 	}
-	defer reader.Close()
+	defer f.Close()
 
-	return buf.ReadAllToBytes(reader)
-}
+	br := bufio.NewReader(f)
 
-func readAsset(file string) ([]byte, error) {
-	bytes, err := readFile(file)
-	if err != nil {
-		return nil, err
-	}
-	return bytes, err
-}
-
-func find(data, code []byte) []byte {
-	codeL := len(code)
-	if codeL == 0 {
-		return nil
-	}
 	for {
-		dataL := len(data)
-		if dataL < 2 {
-			return nil
-		}
-		x, y := decodeVarint(data[1:])
-		if x == 0 && y == 0 {
-			return nil
-		}
-		headL, bodyL := 1+y, int(x)
-		dataL -= headL
-		if dataL < bodyL {
-			return nil
-		}
-		data = data[headL:]
-		if int(data[1]) == codeL {
-			for i := 0; i < codeL && data[2+i] == code[i]; i++ {
-				if i+1 == codeL {
-					return data[:bodyL]
-				}
+		_, err := br.ReadByte()
+		if err != nil {
+			if err == io.EOF {
+				break
 			}
+			return nil, err
 		}
-		if dataL == bodyL {
-			return nil
+
+		entryLen, err := binary.ReadUvarint(br)
+		if err != nil {
+			if err == io.EOF {
+				break
+			}
+			return nil, err
 		}
-		data = data[bodyL:]
+		if entryLen == 0 || entryLen > maxEntrySize {
+			continue
+		}
+
+		entry := make([]byte, entryLen)
+		if _, err := io.ReadFull(br, entry); err != nil {
+			return nil, err
+		}
+
+		if matchCode(entry, code) {
+			return entry, nil
+		}
 	}
+
+	return nil, fmt.Errorf("code %s not found", string(code))
 }
 
-func decodeVarint(buf []byte) (x uint64, n int) {
-	for shift := uint(0); shift < 64; shift += 7 {
-		if n >= len(buf) {
-			return 0, 0
-		}
-		b := uint64(buf[n])
-		n++
-		x |= (b & 0x7F) << shift
-		if (b & 0x80) == 0 {
-			return x, n
+func matchCode(entry, code []byte) bool {
+	if len(entry) < 2 || entry[0] != 0x0A {
+		return false
+	}
+	strLen, n := binary.Uvarint(entry[1:])
+	if n <= 0 || int(strLen) != len(code) {
+		return false
+	}
+	start := 1 + n
+	end := start + int(strLen)
+	if end > len(entry) {
+		return false
+	}
+	for i, b := range code {
+		if entry[start+i] != b {
+			return false
 		}
 	}
-
-	// The number is too large to represent in a 64-bit value.
-	return 0, 0
+	return true
 }

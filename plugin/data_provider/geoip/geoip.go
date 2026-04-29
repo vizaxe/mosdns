@@ -99,7 +99,7 @@ func LoadFile(file string, code string, l *netlist.List) error {
 			return err
 		}
 		if cidrs == nil || len(cidrs) == 0 {
-			return fmt.Errorf(code + " not found in " + file)
+			return fmt.Errorf("%s not found in %s", code, file)
 		}
 		for i, cidr := range cidrs {
 			ip, ok := netip.AddrFromSlice(cidr.Ip)

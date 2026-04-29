@@ -26,7 +26,6 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/domain_set"
-	"github.com/xtls/xray-core/app/router"
 	"runtime/debug"
 	"strings"
 )
@@ -98,18 +97,18 @@ func LoadFile(file string, code string, m *domain.MixMatcher[struct{}]) error {
 			return err
 		}
 		if domains == nil || len(domains) == 0 {
-			return fmt.Errorf(code + " not found in " + file)
+			return fmt.Errorf("%s not found in %s", code, file)
 		}
 		for _, dom := range domains {
 			var pattern = dom.Value
 			switch dom.Type {
-			case router.Domain_Full:
+			case geofile.Domain_Full:
 				pattern = domain.MatcherFull + ":" + pattern
-			case router.Domain_Domain:
+			case geofile.Domain_Domain:
 				pattern = domain.MatcherDomain + ":" + pattern
-			case router.Domain_Regex:
+			case geofile.Domain_Regex:
 				pattern = domain.MatcherRegexp + ":" + pattern
-			case router.Domain_Plain:
+			case geofile.Domain_Plain:
 				pattern = domain.MatcherKeyword + ":" + pattern
 			default:
 				continue

@@ -20,7 +20,7 @@
 package query_context
 
 import (
-	json "github.com/bytedance/sonic"
+	"encoding/json"
 	"sync/atomic"
 	"time"
 

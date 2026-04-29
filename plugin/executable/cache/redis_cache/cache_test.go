@@ -20,20 +20,21 @@
 package redis_cache
 
 import (
+	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache"
 	"github.com/miekg/dns"
 	"net/netip"
 	"testing"
 )
 
 var (
-	args = &Args{
+	testArgs = &Args{
 		Url:          "unix:///dev/shm/redis.sock?db=1",
 		LazyCacheTTL: 86400,
 		Separator:    ":",
 		Prefix:       "test_prefix",
 		StoreOnly:    false,
 	}
-	cache, _ = NewRedisCache(args, "test", nil)
+	testCache, _ = NewRedisCache(testArgs, "test", nil)
 )
 
 func Test_store(t *testing.T) {
@@ -47,7 +48,7 @@ func Test_store(t *testing.T) {
 	})
 	addr, _ := netip.ParseAddr("127.0.0.1")
 	r := &dns.Msg{}
-	setDefaultVal(r)
+	cache.SetDefaultVal(r)
 	r.SetReply(q)
 	r.Answer = append(r.Answer, &dns.A{
 		Hdr: dns.RR_Header{
@@ -58,8 +59,8 @@ func Test_store(t *testing.T) {
 		},
 		A: addr.AsSlice(),
 	})
-	key := getMsgKey(q, args.Separator, args.Prefix)
-	ok := cache.saveRespToCache(key, r, args.LazyCacheTTL)
+	key := getMsgKey(q, testArgs.Separator, testArgs.Prefix)
+	ok := testCache.saveRespToCache(key, r, testArgs.LazyCacheTTL, "")
 	println(ok)
 }
 
@@ -72,17 +73,15 @@ func Test_get(t *testing.T) {
 		Qtype:  dns.TypeA,
 		Qclass: dns.ClassINET,
 	})
-	key := getMsgKey(q, args.Separator, args.Prefix)
-	resp, ok := cache.getRespFromCache(key, true, args.LazyCacheTTL)
-	if ok {
-		println(string(marshalDNS(resp)))
-	} else {
+	key := getMsgKey(q, testArgs.Separator, testArgs.Prefix)
+	_, ok := testCache.getRespFromCache(key, true, testArgs.LazyCacheTTL)
+	if !ok {
 		println("no data")
 	}
 }
 
 func Test_del(t *testing.T) {
-	err := cache.Clean()
+	err := testCache.Clean()
 	if err != nil {
 		t.Fatal("del err", err)
 	}
