@@ -17,7 +17,7 @@ type lazyDnsConn struct {
 	mu                 sync.Mutex
 	earlyReserveCallWg sync.WaitGroup
 	closed             bool
-	reservedQuery      int
+	reservedQuery      atomic.Int32
 	dialFinished       chan struct{}
 	c                  DnsConn
 	dialErr            error
@@ -119,10 +119,10 @@ func (lc *lazyDnsConn) ReserveNewQuery() (_ ReservedExchanger, closed bool) {
 		lc.fastPath.Store(1)
 		return dc.ReserveNewQuery()
 	default:
-		if lc.reservedQuery >= lc.maxConcurrentQuery {
+		if lc.reservedQuery.Load() >= int32(lc.maxConcurrentQuery) {
 			return nil, false
 		}
-		lc.reservedQuery++
+		lc.reservedQuery.Add(1)
 		lc.earlyReserveCallWg.Add(1)
 		return (*lazyDnsConnEarlyReservedExchanger)(lc), false
 	}
@@ -133,11 +133,7 @@ type lazyDnsConnEarlyReservedExchanger lazyDnsConn
 var _ ReservedExchanger = (*lazyDnsConnEarlyReservedExchanger)(nil)
 
 func (ote *lazyDnsConnEarlyReservedExchanger) ExchangeReserved(ctx context.Context, q []byte) (resp *[]byte, err error) {
-	defer func() {
-		ote.mu.Lock()
-		ote.reservedQuery--
-		ote.mu.Unlock()
-	}()
+	defer ote.reservedQuery.Add(-1)
 
 	select {
 	case <-ctx.Done():
@@ -159,7 +155,5 @@ func (ote *lazyDnsConnEarlyReservedExchanger) ExchangeReserved(ctx context.Conte
 
 func (ote *lazyDnsConnEarlyReservedExchanger) WithdrawReserved() {
 	ote.earlyReserveCallWg.Done()
-	ote.mu.Lock()
-	ote.reservedQuery--
-	ote.mu.Unlock()
+	ote.reservedQuery.Add(-1)
 }

@@ -75,6 +75,12 @@ func ServeTCP(l net.Listener, h Handler, opts TCPServerOpts) error {
 			defer c.Close()
 			defer cancelConn(errConnectionCtxCanceled)
 
+			// Try to get server name from tls conn once per connection.
+			var serverName string
+			if tlsConn, ok := c.(*tls.Conn); ok {
+				serverName = tlsConn.ConnectionState().ServerName
+			}
+
 			firstRead := true
 			for {
 				if firstRead {
@@ -86,12 +92,6 @@ func ServeTCP(l net.Listener, h Handler, opts TCPServerOpts) error {
 				req, _, err := dnsutils.ReadMsgFromTCP(c)
 				if err != nil {
 					return // read err, close the connection
-				}
-
-				// Try to get server name from tls conn.
-				var serverName string
-				if tlsConn, ok := c.(*tls.Conn); ok {
-					serverName = tlsConn.ConnectionState().ServerName
 				}
 
 				// handle query

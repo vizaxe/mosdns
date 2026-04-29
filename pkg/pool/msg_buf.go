@@ -35,35 +35,35 @@ const packBufferSize = 8191
 // Callers should release the buf by calling ReleaseBuf after they have done
 // with the wire []byte.
 func PackBuffer(m *dns.Msg) (*[]byte, error) {
-	packBuf := GetBuf(packBufferSize)
-	defer ReleaseBuf(packBuf)
-	wire, err := m.PackBuffer(*packBuf)
+	buf := GetBuf(packBufferSize)
+	wire, err := m.PackBuffer(*buf)
 	if err != nil {
+		ReleaseBuf(buf)
 		return nil, err
 	}
-
-	msgBuf := GetBuf(len(wire))
-	copy(*msgBuf, wire)
-	return msgBuf, nil
+	*buf = (*buf)[:len(wire)]
+	return buf, nil
 }
 
 // PackBuffer packs the dns msg m to wire format, with to bytes length header.
 // Callers should release the buf by calling ReleaseBuf.
 func PackTCPBuffer(m *dns.Msg) (*[]byte, error) {
-	packBuf := GetBuf(packBufferSize)
-	defer ReleaseBuf(packBuf)
-	wire, err := m.PackBuffer((*packBuf)[2:])
+	buf := GetBuf(packBufferSize + 2)
+	(*buf) = (*buf)[:2]
+	wire, err := m.PackBuffer((*buf)[2:])
 	if err != nil {
+		ReleaseBuf(buf)
 		return nil, err
 	}
 
 	l := len(wire)
 	if l > dns.MaxMsgSize {
+		ReleaseBuf(buf)
 		return nil, fmt.Errorf("dns payload size %d is too large", l)
 	}
 
-	msgBuf := GetBuf(2 + len(wire))
-	binary.BigEndian.PutUint16(*msgBuf, uint16(l))
-	copy((*msgBuf)[2:], wire)
-	return msgBuf, nil
+	totalLen := 2 + l
+	*buf = (*buf)[:totalLen]
+	binary.BigEndian.PutUint16(*buf, uint16(l))
+	return buf, nil
 }

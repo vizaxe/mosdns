@@ -23,7 +23,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/IrineSistiana/mosdns/v5/pkg/pool"
 	"github.com/IrineSistiana/mosdns/v5/pkg/upstream"
 	"github.com/miekg/dns"
 	"github.com/prometheus/client_golang/prometheus"
@@ -150,10 +149,4 @@ func (q *queryInfo) MarshalLogObject(encoder zapcore.ObjectEncoder) error {
 		encoder.AddUint16("qclass", question.Qclass)
 	}
 	return nil
-}
-
-func copyPayload(b *[]byte) *[]byte {
-	bc := pool.GetBuf(len(*b))
-	copy(*bc, *b)
-	return bc
 }

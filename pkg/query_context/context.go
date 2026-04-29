@@ -305,7 +305,8 @@ func addNewAndSwapOldOpt(m *dns.Msg) *dns.OPT {
 func popOpt(m *dns.Msg) *dns.OPT {
 	for i := len(m.Extra) - 1; i >= 0; i-- {
 		if opt, ok := m.Extra[i].(*dns.OPT); ok {
-			m.Extra = append(m.Extra[:i], m.Extra[i+1:]...)
+			m.Extra[i] = m.Extra[len(m.Extra)-1]
+			m.Extra = m.Extra[:len(m.Extra)-1]
 			return opt
 		}
 	}

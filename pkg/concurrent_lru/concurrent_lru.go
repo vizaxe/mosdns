@@ -134,6 +134,7 @@ func (c *ConcurrentLRU[K, V]) Flush() {
 }
 
 func (c *ConcurrentLRU[K, V]) Get(key K) (v V, ok bool) {
+	// LRU Get() modifies internal list (moves to back), so we need write lock.
 	c.Lock()
 	defer c.Unlock()
 

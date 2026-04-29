@@ -85,7 +85,10 @@ func NewEntryHandler(opts EntryHandlerOpts) *EntryHandler {
 // If entry returns without a response, a REFUSED response will be returned.
 func (h *EntryHandler) Handle(ctx context.Context, q *dns.Msg, serverMeta server.QueryMeta, packMsgPayload func(m *dns.Msg) (*[]byte, error)) *[]byte {
 	// basic query check.
-	if q.Response || len(q.Question) != 1 || len(q.Answer)+len(q.Ns) > 0 || len(q.Extra) > 1 {
+	if q.Response || len(q.Question) != 1 || len(q.Answer)+len(q.Ns) > 0 {
+		return nil
+	}
+	if len(q.Extra) > 0 && q.Extra[len(q.Extra)-1].Header().Rrtype != dns.TypeOPT {
 		return nil
 	}
 

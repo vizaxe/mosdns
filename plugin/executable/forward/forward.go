@@ -268,15 +268,12 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 	r := rand.IntN(len(us))
 	for i := 0; i < concurrent; i++ {
 		u := us[(r+i)%len(us)]
-		qc := copyPayload(queryPayload)
 		go func(uqid uint32, question dns.Question) {
-			defer pool.ReleaseBuf(qc)
-			// Give each upstream a fixed timeout to finish the query.
-			upstreamCtx, cancel := context.WithTimeout(context.Background(), queryTimeout)
+			upstreamCtx, cancel := context.WithTimeout(ctx, queryTimeout)
 			defer cancel()
 
 			var r *dns.Msg
-			respPayload, err := u.ExchangeContext(upstreamCtx, *qc)
+			respPayload, err := u.ExchangeContext(upstreamCtx, *queryPayload)
 			if err != nil {
 				f.logger.Warn(
 					"upstream error",
