@@ -278,12 +278,6 @@ func NewUpstream(addr string, opt Opt) (_ Upstream, err error) {
 		}
 	}
 
-	closeIfFuncErr := func(c io.Closer) {
-		if err != nil {
-			c.Close()
-		}
-	}
-
 	switch addrURL.Scheme {
 	case "", "udp":
 		const defaultPort = 53
@@ -439,7 +433,6 @@ func NewUpstream(addr string, opt Opt) (_ Upstream, err error) {
 			quicConfig := newDefaultClientQuicConfig()
 			quicConfig.MaxIdleTimeout = idleConnTimeout
 
-			defer closeIfFuncErr(quicTransport)
 			addonCloser = quicTransport
 			t = &http3.Transport{
 				TLSClientConfig: opt.TLSConfig,
@@ -486,6 +479,9 @@ func NewUpstream(addr string, opt Opt) (_ Upstream, err error) {
 
 		u, err := doh.NewUpstream(addrURL.String(), opt.UserAgent, t, opt.Logger)
 		if err != nil {
+			if addonCloser != nil {
+				addonCloser.Close()
+			}
 			return nil, fmt.Errorf("failed to create doh upstream, %w", err)
 		}
 

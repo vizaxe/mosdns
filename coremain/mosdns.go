@@ -21,6 +21,7 @@ package coremain
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/mlog"
@@ -83,7 +84,7 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 			case err := <-errChan:
 				m.sc.SendCloseSignal(err)
 			case <-closeSignal:
-				_ = httpServer.Close()
+				_ = httpServer.Shutdown(context.Background())
 			}
 		})
 	}

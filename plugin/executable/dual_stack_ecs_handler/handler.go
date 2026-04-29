@@ -67,7 +67,7 @@ func NewHandler(args Args) (*ECSHandler, error) {
 	}
 
 	var ipv6Preset netip.Addr
-	if len(args.Ipv4) > 0 {
+	if len(args.Ipv6) > 0 {
 		addr, err := netip.ParseAddr(args.Ipv6)
 		if err != nil {
 			return nil, fmt.Errorf("invalid ipv6 address, %w", err)
