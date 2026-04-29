@@ -205,6 +205,10 @@ func (c *MemoryCache) Exec(ctx context.Context, qCtx *query_context.Context, nex
 		c.hitTotal.Inc()
 		cachedResp.Id = q.Id // change msg id
 		qCtx.SetResponse(cachedResp)
+		qCtx.CacheHit = true
+		query_context.RecordCache(true)
+	} else {
+		query_context.RecordCache(false)
 	}
 
 	err := next.ExecNext(ctx, qCtx)

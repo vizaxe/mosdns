@@ -21,6 +21,7 @@ package query_context
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -56,7 +57,16 @@ type Context struct {
 
 	blackHoleTag      string
 	blackHoleOrigResp *dns.Msg
+
+	UpstreamDur time.Duration // time spent waiting for upstream response
+	CacheDur    time.Duration // cached response age / lookup time
+	CacheHit    bool          // whether the response was served from cache
 }
+
+var (
+	totalQueries atomic.Uint64
+	cacheHits    atomic.Uint64
+)
 
 func (ctx *Context) SetBlackHoleTag(tag string) {
 	ctx.blackHoleTag = tag
@@ -182,6 +192,96 @@ func (ctx *Context) InfoField() zap.Field {
 	return zap.Object("query", ctx)
 }
 
+// LogLine returns a formatted log line:
+// [2006-01-02 15:04:05] client protocol qtype qname -> rcode ips upstreamDur/cacheDur totalDur
+func (ctx *Context) LogLine() string {
+	ts := ctx.startTime.Format("2006-01-02 15:04:05")
+
+	clientIP := "-"
+	if addr := ctx.ServerMeta.ClientAddr; addr.IsValid() {
+		clientIP = addr.String()
+	}
+
+	protocol := ctx.ServerMeta.Protocol
+	if protocol == "" {
+		protocol = "-"
+	}
+
+	q := ctx.query.Question[0]
+	qtype := dns.TypeToString[q.Qtype]
+	if qtype == "" {
+		qtype = fmt.Sprintf("TYPE%d", q.Qtype)
+	}
+	qname := q.Name
+
+	rcode := "-"
+	respIPs := ""
+	if r := ctx.resp; r != nil {
+		rcode = dns.RcodeToString[r.Rcode]
+		if rcode == "" {
+			rcode = fmt.Sprintf("RCODE%d", r.Rcode)
+		}
+		respIPs = extractRespIPs(r)
+	}
+
+	totalDur := time.Since(ctx.startTime)
+	upstreamStr := "-"
+	if ctx.UpstreamDur > 0 {
+		upstreamStr = fmt.Sprintf("%dms", ctx.UpstreamDur.Milliseconds())
+	}
+	cacheStr := "-"
+	if ctx.CacheDur > 0 {
+		cacheStr = fmt.Sprintf("%dms", ctx.CacheDur.Milliseconds())
+	}
+
+	cacheStatus := "cache_miss"
+	if ctx.CacheHit {
+		cacheStatus = "cache_hit"
+	}
+	rate := cacheHitRate()
+
+	return fmt.Sprintf("[%s] %s %.1f%% %s %s %s %s -> %s %s %s/%s %dms",
+		ts, cacheStatus, rate, clientIP, protocol, qtype, qname, rcode, respIPs,
+		upstreamStr, cacheStr, totalDur.Milliseconds())
+}
+
+func RecordCache(hit bool) {
+	totalQueries.Add(1)
+	if hit {
+		cacheHits.Add(1)
+	}
+}
+
+func cacheHitRate() float64 {
+	t := totalQueries.Load()
+	if t == 0 {
+		return 0
+	}
+	return float64(cacheHits.Load()) * 100 / float64(t)
+}
+
+func extractRespIPs(m *dns.Msg) string {
+	b := make([]byte, 0, 64)
+	for _, rr := range m.Answer {
+		switch v := rr.(type) {
+		case *dns.A:
+			if len(b) > 0 {
+				b = append(b, ',')
+			}
+			b = append(b, v.A.String()...)
+		case *dns.AAAA:
+			if len(b) > 0 {
+				b = append(b, ',')
+			}
+			b = append(b, v.AAAA.String()...)
+		}
+	}
+	if len(b) > 0 {
+		return string(b)
+	}
+	return "-"
+}
+
 // Copy deep copies this Context.
 // See CopyTo.
 func (ctx *Context) Copy() *Context {
@@ -208,6 +308,8 @@ func (ctx *Context) CopyTo(d *Context) *Context {
 	}
 	d.upstreamOpt = ctx.upstreamOpt
 
+	d.UpstreamDur = ctx.UpstreamDur
+	d.CacheDur = ctx.CacheDur
 	d.kv = copyMap(ctx.kv)
 	d.marks = copyMap(ctx.marks)
 	return d

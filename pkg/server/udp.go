@@ -89,7 +89,7 @@ func ServeUDP(c *net.UDPConn, h Handler, opts UDPServerOpts) error {
 
 		// handle query
 		go func() {
-			payload := h.Handle(listenerCtx, q, QueryMeta{ClientAddr: remoteAddr.Addr(), FromUDP: true}, pool.PackBuffer)
+			payload := h.Handle(listenerCtx, q, QueryMeta{ClientAddr: remoteAddr.Addr(), Protocol: "UDP"}, pool.PackBuffer)
 			if payload == nil {
 				return
 			}
@@ -145,7 +145,7 @@ func ServeUnix(c *net.UnixConn, h Handler, opts UDPServerOpts) error {
 
 		// handle query
 		go func() {
-			payload := h.Handle(listenerCtx, q, QueryMeta{ClientAddr: netip.Addr{}, FromUDP: true}, pool.PackBuffer)
+			payload := h.Handle(listenerCtx, q, QueryMeta{ClientAddr: netip.Addr{}, Protocol: "unixgram"}, pool.PackBuffer)
 			if payload == nil {
 				return
 			}

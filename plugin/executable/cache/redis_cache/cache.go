@@ -158,6 +158,10 @@ func (c *RedisCache) Exec(ctx context.Context, qCtx *query_context.Context, next
 			}
 			cachedResp.Id = q.Id // change msg id
 			qCtx.SetResponse(cachedResp)
+			qCtx.CacheHit = true
+			query_context.RecordCache(true)
+		} else {
+			query_context.RecordCache(false)
 		}
 	}
 

@@ -94,8 +94,13 @@ func (h *HttpHandler) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	httpProto := "HTTP"
+	if req.TLS != nil {
+		httpProto = "HTTPS"
+	}
 	queryMeta := QueryMeta{
 		ClientAddr: clientAddr,
+		Protocol:   httpProto,
 	}
 	if u := req.URL; u != nil {
 		queryMeta.UrlPath = u.Path

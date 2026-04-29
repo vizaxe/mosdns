@@ -124,7 +124,7 @@ func (h *EntryHandler) Handle(ctx context.Context, q *dns.Msg, serverMeta server
 		resp.Extra = append(resp.Extra, respOpt)
 	}
 
-	if serverMeta.FromUDP {
+	if serverMeta.IsUDP() {
 		udpSize := getValidUDPSize(qCtx.ClientOpt())
 		resp.Truncate(udpSize)
 	}
@@ -134,6 +134,7 @@ func (h *EntryHandler) Handle(ctx context.Context, q *dns.Msg, serverMeta server
 		h.opts.Logger.Error("internal err: failed to pack resp msg", qCtx.InfoField(), zap.Error(err))
 		return nil
 	}
+	h.opts.Logger.Info(qCtx.LogLine())
 	return payload
 }
 

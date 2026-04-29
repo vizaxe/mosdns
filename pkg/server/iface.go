@@ -20,10 +20,14 @@ type Handler interface {
 }
 
 type QueryMeta struct {
-	FromUDP bool
+	Protocol string // "UDP", "TCP", "TLS", "HTTP", "HTTPS", "QUIC", "unixgram"
 
 	// Optional
 	ClientAddr netip.Addr
 	ServerName string
 	UrlPath    string
+}
+
+func (m QueryMeta) IsUDP() bool {
+	return m.Protocol == "UDP" || m.Protocol == "unixgram"
 }

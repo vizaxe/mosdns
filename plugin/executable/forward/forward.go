@@ -273,7 +273,9 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 			defer cancel()
 
 			var r *dns.Msg
+			start := time.Now()
 			respPayload, err := u.ExchangeContext(upstreamCtx, *queryPayload)
+			qCtx.UpstreamDur = time.Since(start)
 			if err != nil {
 				f.logger.Warn(
 					"upstream error",
