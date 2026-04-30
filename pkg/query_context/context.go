@@ -58,10 +58,14 @@ type Context struct {
 	blackHoleTag      string
 	blackHoleOrigResp *dns.Msg
 
-	UpstreamDur time.Duration // time spent waiting for upstream response
-	CacheDur    time.Duration // cached response age / lookup time
-	CacheHit    bool          // whether the response was served from cache
-	CacheName   string        // whether the response was served from cache
+	rejectCode    int  // reject code set by reject plugin
+	rejectQueried bool // whether reject plugin handled this query
+
+	UpstreamDur  time.Duration // time spent waiting for upstream response
+	CacheDur     time.Duration // cached response age / lookup time
+	CacheHit     bool          // whether the response was served from cache
+	CacheName    string        // whether the response was served from cache
+	CacheQueried bool          // whether the request passed through cache module
 }
 
 var (
@@ -83,6 +87,15 @@ func (ctx *Context) SetBlackHoleOrigResp(r *dns.Msg) {
 
 func (ctx *Context) GetBlackHoleOrigResp() *dns.Msg {
 	return ctx.blackHoleOrigResp
+}
+
+func (ctx *Context) SetRejectCode(code int) {
+	ctx.rejectCode = code
+	ctx.rejectQueried = true
+}
+
+func (ctx *Context) GetRejectCode() int {
+	return ctx.rejectCode
 }
 
 var contextUid atomic.Uint32
@@ -194,7 +207,8 @@ func (ctx *Context) InfoField() zap.Field {
 }
 
 // LogLine returns a formatted log line:
-// [2006-01-02 15:04:05] client protocol qtype qname -> rcode ips upstreamDur/cacheDur totalDur
+// [2006-01-02 15:04:05] status rate clientIP protocol qtype qname -> rcode respIPs upstreamDur/cacheDur totalDur
+// status: cache_hit(name), cache_miss, blackhole(tag), reject(rcode), or "-"
 func (ctx *Context) LogLine() string {
 	ts := ctx.startTime.Format("2006-01-02 15:04:05")
 
@@ -235,14 +249,32 @@ func (ctx *Context) LogLine() string {
 		cacheStr = fmt.Sprintf("%dms", ctx.CacheDur.Milliseconds())
 	}
 
-	cacheStatus := "cache_miss"
-	if ctx.CacheHit {
-		cacheStatus = "cache_hit" + "(" + ctx.CacheName + ")"
+	var status string
+	var rate string
+	if tag := ctx.blackHoleTag; tag != "" {
+		status = "blackhole(" + tag + ")"
+		rate = "-"
+	} else if ctx.rejectQueried {
+		rcodeName := dns.RcodeToString[ctx.rejectCode]
+		if rcodeName == "" {
+			rcodeName = fmt.Sprintf("RCODE%d", ctx.rejectCode)
+		}
+		status = "reject(" + rcodeName + ")"
+		rate = "-"
+	} else if ctx.CacheQueried {
+		if ctx.CacheHit {
+			status = "cache_hit(" + ctx.CacheName + ")"
+		} else {
+			status = "cache_miss"
+		}
+		rate = fmt.Sprintf("%.1f%%", cacheHitRate())
+	} else {
+		status = "-"
+		rate = "-"
 	}
-	rate := cacheHitRate()
 
-	return fmt.Sprintf("[%s] %s %.1f%% %s %s %s %s -> %s %s %s/%s %dms",
-		ts, cacheStatus, rate, clientIP, protocol, qtype, qname, rcode, respIPs,
+	return fmt.Sprintf("[%s] %s %s %s %s %s %s -> %s %s %s/%s %dms",
+		ts, status, rate, clientIP, protocol, qtype, qname, rcode, respIPs,
 		upstreamStr, cacheStr, totalDur.Milliseconds())
 }
 
@@ -309,8 +341,17 @@ func (ctx *Context) CopyTo(d *Context) *Context {
 	}
 	d.upstreamOpt = ctx.upstreamOpt
 
+	d.blackHoleTag = ctx.blackHoleTag
+	if ctx.blackHoleOrigResp != nil {
+		d.blackHoleOrigResp = ctx.blackHoleOrigResp.Copy()
+	}
+	d.rejectCode = ctx.rejectCode
+	d.rejectQueried = ctx.rejectQueried
 	d.UpstreamDur = ctx.UpstreamDur
 	d.CacheDur = ctx.CacheDur
+	d.CacheHit = ctx.CacheHit
+	d.CacheName = ctx.CacheName
+	d.CacheQueried = ctx.CacheQueried
 	d.kv = copyMap(ctx.kv)
 	d.marks = copyMap(ctx.marks)
 	return d

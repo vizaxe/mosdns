@@ -64,6 +64,7 @@ func (a *Args) init() {
 
 type RedisCache struct {
 	args *Args
+	tag  string
 
 	logger       *zap.Logger
 	backend      cache_backend.CacheBackend[cache_backend.StringKey, string]
@@ -102,6 +103,7 @@ func NewRedisCache(args *Args, tag string, logger *zap.Logger) (*RedisCache, err
 	lb := map[string]string{"tag": tag}
 	p := &RedisCache{
 		args: args,
+		tag:  tag,
 
 		logger:      logger,
 		backend:     backend,
@@ -135,6 +137,10 @@ func NewRedisCache(args *Args, tag string, logger *zap.Logger) (*RedisCache, err
 }
 
 func (c *RedisCache) Exec(ctx context.Context, qCtx *query_context.Context, next sequence.ChainWalker) error {
+	if qCtx.GetBlackHoleTag() != "" {
+		return next.ExecNext(ctx, qCtx)
+	}
+
 	c.queryTotal.Inc()
 	q := qCtx.Q()
 
@@ -144,12 +150,15 @@ func (c *RedisCache) Exec(ctx context.Context, qCtx *query_context.Context, next
 	}
 
 	var cachedResp *dns.Msg = nil
+	qCtx.CacheQueried = true
+	wasHit := false
 	if c.args.StoreOnly {
 		c.logger.Debug("cache hit but store only, will query upstream and update cache", zap.Any("query", qCtx), zap.Any("resp", &cachedResp))
 	} else {
 		cachedResp, lazyHit := c.getRespFromCache(msgKey, c.args.LazyCacheTTL > 0 || c.args.LazyCacheTTL == redis.KeepTTL, cache_backend.ExpiredMsgTtl)
 		if cachedResp != nil {
 			c.hitTotal.Inc()
+			wasHit = true
 			if lazyHit {
 				c.lazyHitTotal.Inc()
 				c.logger.Debug("lazy cache hit ", zap.Any("query", qCtx), zap.Any("resp", &cachedResp))
@@ -160,22 +169,25 @@ func (c *RedisCache) Exec(ctx context.Context, qCtx *query_context.Context, next
 			cachedResp.Id = q.Id // change msg id
 			qCtx.SetResponse(cachedResp)
 			qCtx.CacheHit = true
-			qCtx.CacheName = "redis_cache"
-			query_context.RecordCache(true)
+			qCtx.CacheName = c.tag
 		} else {
-			query_context.RecordCache(false)
+			qCtx.CacheHit = false
 		}
 	}
 
 	err := next.ExecNext(ctx, qCtx)
 
-	if r := qCtx.R(); r != nil && cachedResp != r { // pointer compare. r is not cachedResp
-		if resp := qCtx.GetBlackHoleOrigResp(); resp != nil {
-			c.saveRespToCache(msgKey, resp, c.args.LazyCacheTTL, qCtx.GetBlackHoleTag())
-		} else {
-			c.saveRespToCache(msgKey, r, c.args.LazyCacheTTL, "")
+	if qCtx.GetBlackHoleTag() == "" {
+		if wasHit {
+			query_context.RecordCache(true)
+		} else if !c.args.StoreOnly {
+			query_context.RecordCache(false)
 		}
-		c.updatedKey.Add(1)
+
+		if r := qCtx.R(); r != nil && cachedResp != r { // pointer compare. r is not cachedResp
+			c.saveRespToCache(msgKey, r, c.args.LazyCacheTTL, "")
+			c.updatedKey.Add(1)
+		}
 	}
 	return err
 }

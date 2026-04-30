@@ -49,6 +49,7 @@ func (a ActionReject) Exec(_ context.Context, qCtx *query_context.Context, _ Cha
 	r := new(dns.Msg)
 	r.SetReply(qCtx.Q())
 	r.Rcode = a.Rcode
+	qCtx.SetRejectCode(a.Rcode)
 	qCtx.SetResponse(r)
 	return nil
 }

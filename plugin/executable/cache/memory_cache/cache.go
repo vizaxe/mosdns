@@ -84,6 +84,7 @@ func (a *Args) init() {
 
 type MemoryCache struct {
 	args *Args
+	tag  string
 
 	logger       *zap.Logger
 	backend      *memory_cache_backend.MemoryCache[key, *cache.Item]
@@ -102,6 +103,7 @@ func Init(bp *coremain.BP, args any) (any, error) {
 	c := NewMemoryCache(args.(*Args), Opts{
 		Logger:     bp.L(),
 		MetricsTag: bp.Tag(),
+		Tag:        bp.Tag(),
 	})
 
 	if err := c.RegMetricsTo(prometheus.WrapRegistererWithPrefix(PluginType+"_", bp.M().GetMetricsReg())); err != nil {
@@ -123,12 +125,13 @@ func quickSetupCache(bq sequence.BQ, s string) (any, error) {
 		size = i
 	}
 	// Don't register metrics in quick setup.
-	return NewMemoryCache(&Args{Size: size}, Opts{Logger: bq.L()}), nil
+	return NewMemoryCache(&Args{Size: size}, Opts{Logger: bq.L(), Tag: PluginType}), nil
 }
 
 type Opts struct {
 	Logger     *zap.Logger
 	MetricsTag string
+	Tag        string
 }
 
 func NewMemoryCache(args *Args, opts Opts) *MemoryCache {
@@ -143,6 +146,7 @@ func NewMemoryCache(args *Args, opts Opts) *MemoryCache {
 	lb := map[string]string{"tag": opts.MetricsTag}
 	p := &MemoryCache{
 		args:        args,
+		tag:         opts.Tag,
 		logger:      logger,
 		backend:     backend,
 		closeNotify: make(chan struct{}),
@@ -189,6 +193,10 @@ func (c *MemoryCache) RegMetricsTo(r prometheus.Registerer) error {
 }
 
 func (c *MemoryCache) Exec(ctx context.Context, qCtx *query_context.Context, next sequence.ChainWalker) error {
+	if qCtx.GetBlackHoleTag() != "" {
+		return next.ExecNext(ctx, qCtx)
+	}
+
 	c.queryTotal.Inc()
 	q := qCtx.Q()
 
@@ -197,6 +205,7 @@ func (c *MemoryCache) Exec(ctx context.Context, qCtx *query_context.Context, nex
 		return next.ExecNext(ctx, qCtx)
 	}
 
+	qCtx.CacheQueried = true
 	cachedResp, lazyHit := getRespFromCache(msgKey, c.backend, c.args.LazyCacheTTL > 0, expiredMsgTtl)
 	if lazyHit {
 		c.lazyHitTotal.Inc()
@@ -207,17 +216,24 @@ func (c *MemoryCache) Exec(ctx context.Context, qCtx *query_context.Context, nex
 		cachedResp.Id = q.Id // change msg id
 		qCtx.SetResponse(cachedResp)
 		qCtx.CacheHit = true
-		qCtx.CacheName = "memory_cache"
-		query_context.RecordCache(true)
+		qCtx.CacheName = c.tag
 	} else {
-		query_context.RecordCache(false)
+		qCtx.CacheHit = false
 	}
 
 	err := next.ExecNext(ctx, qCtx)
 
-	if r := qCtx.R(); r != nil && cachedResp != r { // pointer compare. r is not cachedResp
-		saveRespToCache(msgKey, r, c.backend, c.args.LazyCacheTTL)
-		c.updatedKey.Add(1)
+	if qCtx.GetBlackHoleTag() == "" {
+		if cachedResp != nil {
+			query_context.RecordCache(true)
+		} else {
+			query_context.RecordCache(false)
+		}
+
+		if r := qCtx.R(); r != nil && cachedResp != r { // pointer compare. r is not cachedResp
+			saveRespToCache(msgKey, r, c.backend, c.args.LazyCacheTTL)
+			c.updatedKey.Add(1)
+		}
 	}
 	return err
 }
