@@ -7,6 +7,7 @@ import (
 
 	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
 	"github.com/miekg/dns"
+	"github.com/redis/go-redis/v9"
 )
 
 func (c *RedisCache) Get(key cache_backend.StringKey) string {
@@ -20,7 +21,7 @@ func (c *RedisCache) Store(key cache_backend.StringKey, value string, ttl time.D
 
 func (c *RedisCache) QueryDns(q *dns.Msg) (*dns.Msg, bool) {
 	key := getMsgKey(q, c.args.Separator, c.args.Prefix)
-	return c.getRespFromCache(key, false, 0)
+	return c.getRespFromCache(key, c.args.LazyCacheTTL > 0 || c.args.LazyCacheTTL == redis.KeepTTL, cache_backend.ExpiredMsgTtl)
 }
 
 func (c *RedisCache) StoreDns(q *dns.Msg, r *dns.Msg) {

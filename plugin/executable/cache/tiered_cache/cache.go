@@ -3,17 +3,21 @@ package tiered_cache
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 	"github.com/miekg/dns"
+	"go.uber.org/zap"
+	"golang.org/x/sync/singleflight"
 )
 
 const PluginType = "tiered_cache"
 
 const defaultAsyncUpdateTimeout = time.Second * 5
+const defaultRetryCount = 1
 
 func init() {
 	coremain.RegNewPluginFunc(PluginType, Init, func() any { return new(Args) })
@@ -22,8 +26,9 @@ func init() {
 var _ sequence.RecursiveExecutable = (*TieredCache)(nil)
 
 type Args struct {
-	L1Tag string `yaml:"l1_tag"`
-	L2Tag string `yaml:"l2_tag"`
+	L1Tag      string `yaml:"l1_tag"`
+	L2Tag      string `yaml:"l2_tag"`
+	RetryCount int    `yaml:"retry_count"`
 }
 
 type dnsCacher interface {
@@ -36,6 +41,8 @@ type TieredCache struct {
 	l2   dnsCacher
 	bp   *coremain.BP
 	args *Args
+
+	lazyUpdateSF singleflight.Group
 }
 
 func Init(bp *coremain.BP, args any) (any, error) {
@@ -49,6 +56,9 @@ func NewTieredCache(bp *coremain.BP, args *Args) (*TieredCache, error) {
 	}
 	if len(args.L2Tag) == 0 {
 		return nil, fmt.Errorf("l2_tag is required")
+	}
+	if args.RetryCount <= 0 {
+		args.RetryCount = defaultRetryCount
 	}
 
 	p1 := bp.M().GetPlugin(args.L1Tag)
@@ -77,6 +87,13 @@ func NewTieredCache(bp *coremain.BP, args *Args) (*TieredCache, error) {
 	}, nil
 }
 
+func (t *TieredCache) queryKey(q *dns.Msg) string {
+	if len(q.Question) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("%s|%d|%d", strings.ToLower(q.Question[0].Name), q.Question[0].Qtype, q.Question[0].Qclass)
+}
+
 func (t *TieredCache) Exec(ctx context.Context, qCtx *query_context.Context, next sequence.ChainWalker) error {
 	if qCtx.GetBlackHoleTag() != "" {
 		return next.ExecNext(ctx, qCtx)
@@ -92,7 +109,7 @@ func (t *TieredCache) Exec(ctx context.Context, qCtx *query_context.Context, nex
 		qCtx.CacheHit = true
 		qCtx.CacheName = t.bp.Tag() + " -> " + t.args.L1Tag
 		if lazyHit {
-			//go t.asyncUpdate(ctx, q, next)
+			t.asyncUpdate(q, next)
 		}
 		err := next.ExecNext(ctx, qCtx)
 		if qCtx.GetBlackHoleTag() == "" {
@@ -109,7 +126,7 @@ func (t *TieredCache) Exec(ctx context.Context, qCtx *query_context.Context, nex
 		qCtx.CacheHit = true
 		qCtx.CacheName = t.bp.Tag() + " -> " + t.args.L2Tag
 		if lazyHit {
-			go t.asyncUpdate(ctx, q, next)
+			t.asyncUpdate(q, next)
 		}
 		err := next.ExecNext(ctx, qCtx)
 		if qCtx.GetBlackHoleTag() == "" {
@@ -132,14 +149,54 @@ func (t *TieredCache) Exec(ctx context.Context, qCtx *query_context.Context, nex
 	return err
 }
 
-func (t *TieredCache) asyncUpdate(ctx context.Context, q *dns.Msg, next sequence.ChainWalker) {
-	qCtx := query_context.NewContext(q.Copy())
-	err := next.ExecNext(ctx, qCtx)
-	if err != nil {
+func (t *TieredCache) asyncUpdate(q *dns.Msg, next sequence.ChainWalker) {
+	key := t.queryKey(q)
+	if key == "" {
 		return
 	}
-	if r := qCtx.R(); r != nil {
-		t.l1.StoreDns(q, r)
-		t.l2.StoreDns(q, r)
+
+	qCopy := q.Copy()
+	lazyUpdateFunc := func() (any, error) {
+		defer t.lazyUpdateSF.Forget(key)
+
+		ctx, cancel := context.WithTimeout(context.Background(), defaultAsyncUpdateTimeout)
+		defer cancel()
+
+		var lastErr error
+		for i := 0; i <= t.args.RetryCount; i++ {
+			if i > 0 {
+				time.Sleep(time.Duration(100*(1<<uint(i-1))) * time.Millisecond)
+			}
+
+			retryNext := next
+			qCtx := query_context.NewContext(qCopy)
+			err := retryNext.ExecNext(ctx, qCtx)
+			if err != nil {
+				lastErr = err
+				t.bp.L().Warn("tiered_cache 异步更新失败",
+					zap.String("query", q.Question[0].String()),
+					zap.Int("attempt", i+1),
+					zap.Error(err),
+				)
+				continue
+			}
+			if r := qCtx.R(); r != nil {
+				t.l1.StoreDns(qCopy, r)
+				t.l2.StoreDns(qCopy, r)
+				lastErr = nil
+				break
+			}
+		}
+
+		if lastErr != nil {
+			t.bp.L().Error("tiered_cache 异步更新重试耗尽",
+				zap.String("query", q.Question[0].String()),
+				zap.Int("retry_count", t.args.RetryCount),
+				zap.Error(lastErr),
+			)
+		}
+		return nil, lastErr
 	}
+
+	t.lazyUpdateSF.DoChan(key, lazyUpdateFunc)
 }

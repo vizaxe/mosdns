@@ -19,7 +19,7 @@ func (c *MemoryCache) Store(key key, value *cache.Item, ttl time.Duration) {
 
 func (c *MemoryCache) QueryDns(q *dns.Msg) (*dns.Msg, bool) {
 	key := getMsgKey(q)
-	return getRespFromCache(key, c.backend, false, 0)
+	return getRespFromCache(key, c.backend, c.args.LazyCacheTTL > 0, expiredMsgTtl)
 }
 
 func (c *MemoryCache) StoreDns(q *dns.Msg, r *dns.Msg) {
