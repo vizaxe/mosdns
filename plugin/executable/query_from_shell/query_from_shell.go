@@ -64,17 +64,17 @@ func QuickSetup(_ sequence.BQ, cmd string) (any, error) {
 }
 
 func getQueryFromShellPlugin(cmd string) *queryFromShell {
+	mutex.Lock()
 	plugin := pluginCache[cmd]
 	if plugin == nil {
-		mutex.Lock()
 		plugin = &queryFromShell{
 			args: &Args{
 				Cmd: cmd,
 			},
 		}
 		pluginCache[cmd] = plugin
-		mutex.Unlock()
 	}
+	mutex.Unlock()
 	return plugin
 }
 

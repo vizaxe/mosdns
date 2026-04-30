@@ -24,8 +24,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend/memory_cache_backend"
-	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache"
 	"io"
 	"net/http"
 	"os"
@@ -33,6 +31,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend/memory_cache_backend"
+	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache"
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/pool"
@@ -206,6 +207,7 @@ func (c *MemoryCache) Exec(ctx context.Context, qCtx *query_context.Context, nex
 		cachedResp.Id = q.Id // change msg id
 		qCtx.SetResponse(cachedResp)
 		qCtx.CacheHit = true
+		qCtx.CacheName = "memory_cache"
 		query_context.RecordCache(true)
 	} else {
 		query_context.RecordCache(false)

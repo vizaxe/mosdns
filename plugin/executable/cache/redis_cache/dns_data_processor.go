@@ -21,6 +21,9 @@ package redis_cache
 
 import (
 	"context"
+	"encoding/json"
+	"time"
+
 	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache"
@@ -28,7 +31,6 @@ import (
 	"github.com/miekg/dns"
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
-	"time"
 )
 
 func (c *RedisCache) doLazyUpdate(msgKey string, qCtx *query_context.Context, next sequence.ChainWalker) {
@@ -58,7 +60,7 @@ func (c *RedisCache) doLazyUpdate(msgKey string, qCtx *query_context.Context, ne
 }
 
 func (c *RedisCache) saveRespToCache(msgKey string, r *dns.Msg, lazyCacheTtl int, blackHoleTag string) bool {
-	msgTtl, ok := cache.CalculateMsgTTL(r, lazyCacheTtl)
+	msgTtl, ok := cache.CalculateMsgTTL(r)
 	if !ok {
 		return false
 	}
@@ -74,8 +76,8 @@ func (c *RedisCache) saveRespToCache(msgKey string, r *dns.Msg, lazyCacheTtl int
 
 	cache.SetDefaultVal(r)
 	v := cache.NewCacheItem(r, msgTtl, blackHoleTag)
-	msg := marshalItem(v)
-	c.backend.Store(cache_backend.StringKey(msgKey), msg, cacheTtl)
+	msg, _ := json.Marshal(v)
+	c.backend.Store(cache_backend.StringKey(msgKey), string(msg), cacheTtl)
 	return true
 }
 
@@ -84,9 +86,9 @@ func (c *RedisCache) getRespFromCache(msgKey string, lazyCacheEnabled bool, lazy
 	if !ok {
 		return nil, false
 	}
-	item := unmarshalItem(v)
-	if item == nil {
+	item := UnmarshalDNSItem([]byte(v))
+	if &item == nil {
 		return nil, false
 	}
-	return cache.PrepareCachedResponse(item, lazyCacheEnabled, lazyTtl)
+	return cache.PrepareCachedResponse(&item, lazyCacheEnabled, lazyTtl)
 }

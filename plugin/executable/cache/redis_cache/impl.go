@@ -2,10 +2,11 @@ package redis_cache
 
 import (
 	"fmt"
-	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
-	"github.com/miekg/dns"
 	"strings"
 	"time"
+
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
+	"github.com/miekg/dns"
 )
 
 func (c *RedisCache) Get(key cache_backend.StringKey) string {
@@ -24,7 +25,7 @@ func (c *RedisCache) QueryDns(q *dns.Msg) (*dns.Msg, bool) {
 
 func (c *RedisCache) StoreDns(q *dns.Msg, r *dns.Msg) {
 	key := getMsgKey(q, c.args.Separator, c.args.Prefix)
-	c.saveRespToCache(key, r, 0, "")
+	c.saveRespToCache(key, r, c.args.LazyCacheTTL, "")
 }
 
 func (c *RedisCache) Close() error {

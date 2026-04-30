@@ -22,7 +22,7 @@ func getRespFromCache(msgKey string, backend *memory_cache_backend.MemoryCache[k
 // saveRespToCache saves r to cache backend. It returns false if r
 // should not be cached and was skipped.
 func saveRespToCache(msgKey string, r *dns.Msg, backend *memory_cache_backend.MemoryCache[key, *cache.Item], lazyCacheTtl int) bool {
-	msgTtl, ok := cache.CalculateMsgTTL(r, lazyCacheTtl)
+	msgTtl, ok := cache.CalculateMsgTTL(r)
 	if !ok {
 		return false
 	}

@@ -61,17 +61,17 @@ func QuickSetup(_ sequence.BQ, name string) (any, error) {
 }
 
 func getNetworkInterfacePlugin(name string) *networkInterface {
+	mutex.Lock()
 	plugin := pluginCache[name]
 	if plugin == nil {
-		mutex.Lock()
 		plugin = &networkInterface{
 			args: &Args{
 				InterfaceName: name,
 			},
 		}
 		pluginCache[name] = plugin
-		mutex.Unlock()
 	}
+	mutex.Unlock()
 	return plugin
 }
 

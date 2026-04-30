@@ -64,7 +64,7 @@ func CopyMsgNoOpt(m *dns.Msg) *dns.Msg {
 	return m2
 }
 
-func CalculateMsgTTL(r *dns.Msg, lazyCacheTtl int) (msgTtl time.Duration, shouldCache bool) {
+func CalculateMsgTTL(r *dns.Msg) (msgTtl time.Duration, shouldCache bool) {
 	if r.Truncated {
 		return 0, false
 	}

@@ -50,6 +50,7 @@ import (
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/cache/memory_cache"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/cache/redis_cache"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/cache/reverse_lookup_redis_cache"
+	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/cache/tiered_cache"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/clean_up_ecs"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/debug_print"
 	_ "github.com/IrineSistiana/mosdns/v5/plugin/executable/dnsmasq_dhcp_leases"

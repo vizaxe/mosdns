@@ -21,10 +21,11 @@ package redis_cache
 
 import (
 	"fmt"
+	"strings"
+
 	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache"
 	"github.com/miekg/dns"
-	"strings"
 )
 
 var _ cache.Cache[cache_backend.StringKey, string] = (*RedisCache)(nil)

@@ -22,6 +22,9 @@ package redis_cache
 import (
 	"context"
 	"fmt"
+	"sync"
+	"sync/atomic"
+
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
 	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend/redis_cache_backend"
@@ -32,8 +35,6 @@ import (
 	"github.com/redis/go-redis/v9"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
-	"sync"
-	"sync/atomic"
 )
 
 const (
@@ -159,6 +160,7 @@ func (c *RedisCache) Exec(ctx context.Context, qCtx *query_context.Context, next
 			cachedResp.Id = q.Id // change msg id
 			qCtx.SetResponse(cachedResp)
 			qCtx.CacheHit = true
+			qCtx.CacheName = "redis_cache"
 			query_context.RecordCache(true)
 		} else {
 			query_context.RecordCache(false)

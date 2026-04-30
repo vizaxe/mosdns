@@ -61,6 +61,7 @@ type Context struct {
 	UpstreamDur time.Duration // time spent waiting for upstream response
 	CacheDur    time.Duration // cached response age / lookup time
 	CacheHit    bool          // whether the response was served from cache
+	CacheName   string        // whether the response was served from cache
 }
 
 var (
@@ -236,7 +237,7 @@ func (ctx *Context) LogLine() string {
 
 	cacheStatus := "cache_miss"
 	if ctx.CacheHit {
-		cacheStatus = "cache_hit"
+		cacheStatus = "cache_hit" + "(" + ctx.CacheName + ")"
 	}
 	rate := cacheHitRate()
 

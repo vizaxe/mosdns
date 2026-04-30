@@ -51,7 +51,10 @@ const (
 
 var _ sequence.RecursiveExecutable = (*ReverseLookupRedisCache)(nil)
 
-var TagNameMap = make(map[string]*ReverseLookupRedisCache)
+var (
+	tagNameMapMu sync.Mutex
+	TagNameMap   = make(map[string]*ReverseLookupRedisCache)
+)
 
 type Args struct {
 	Url          string `yaml:"url"`
@@ -87,7 +90,9 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		return nil, err
 	}
 
+	tagNameMapMu.Lock()
 	TagNameMap[bp.Tag()] = c
+	tagNameMapMu.Unlock()
 	return c, nil
 }
 

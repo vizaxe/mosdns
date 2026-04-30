@@ -1,10 +1,11 @@
 package memory_cache
 
 import (
+	"time"
+
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache"
 	"github.com/miekg/dns"
 	"go.uber.org/zap"
-	"time"
 )
 
 func (c *MemoryCache) Get(key key) *cache.Item {
@@ -23,7 +24,7 @@ func (c *MemoryCache) QueryDns(q *dns.Msg) (*dns.Msg, bool) {
 
 func (c *MemoryCache) StoreDns(q *dns.Msg, r *dns.Msg) {
 	key := getMsgKey(q)
-	saveRespToCache(key, r, c.backend, 0)
+	saveRespToCache(key, r, c.backend, c.args.LazyCacheTTL)
 }
 
 func (c *MemoryCache) Close() error {
