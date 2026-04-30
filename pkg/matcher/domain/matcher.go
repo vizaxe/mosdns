@@ -44,16 +44,26 @@ func NewSubDomainMatcher[T any]() *SubDomainMatcher[T] {
 
 func (m *SubDomainMatcher[T]) Match(s string) (T, bool) {
 	s = NormalizeDomain(s)
-	ds := NewReverseDomainScanner(s)
+	v, ok := m.root.getValue()
+	if len(s) == 0 {
+		return v, ok
+	}
 	currentNode := m.root
-	v, ok := currentNode.getValue()
-	for ds.Scan() {
-		label := ds.NextLabel()
+	for {
+		idx := strings.LastIndexByte(s, '.')
+		label := s
+		if idx >= 0 {
+			label = s[idx+1:]
+			s = s[:idx]
+		}
 		if nextNode := currentNode.getChild(label); nextNode != nil {
 			if nextNode.hasValue() {
 				v, ok = nextNode.getValue()
 			}
 			currentNode = nextNode
+			if idx < 0 {
+				break
+			}
 		} else {
 			break
 		}
@@ -67,14 +77,25 @@ func (m *SubDomainMatcher[T]) Len() int {
 
 func (m *SubDomainMatcher[T]) Add(s string, v T) error {
 	s = NormalizeDomain(s)
-	ds := NewReverseDomainScanner(s)
+	if len(s) == 0 {
+		m.root.storeValue(v)
+		return nil
+	}
 	currentNode := m.root
-	for ds.Scan() {
-		label := ds.NextLabel()
+	for {
+		idx := strings.LastIndexByte(s, '.')
+		label := s
+		if idx >= 0 {
+			label = s[idx+1:]
+			s = s[:idx]
+		}
 		if child := currentNode.getChild(label); child != nil {
 			currentNode = child
 		} else {
 			currentNode = currentNode.newChild(label)
+		}
+		if idx < 0 {
+			break
 		}
 	}
 	currentNode.storeValue(v)
@@ -109,29 +130,49 @@ func (m *FullMatcher[T]) Len() int {
 }
 
 type KeywordMatcher[T any] struct {
-	kws map[string]T
+	kws    map[string]T
+	byChar map[byte][]string // indexed by first byte for fast scan
 }
 
 func NewKeywordMatcher[T any]() *KeywordMatcher[T] {
 	return &KeywordMatcher[T]{
-		kws: make(map[string]T),
+		kws:    make(map[string]T),
+		byChar: make(map[byte][]string),
 	}
 }
 
 func (m *KeywordMatcher[T]) Add(keyword string, v T) error {
-	keyword = NormalizeDomain(keyword) // fqdn-insensitive and case-insensitive
+	keyword = NormalizeDomain(keyword)
 	m.kws[keyword] = v
+	if len(keyword) > 0 {
+		c := keyword[0]
+		m.byChar[c] = append(m.byChar[c], keyword)
+	}
 	return nil
 }
 
 func (m *KeywordMatcher[T]) Match(s string) (v T, ok bool) {
+	if len(m.kws) == 0 {
+		return
+	}
 	s = NormalizeDomain(s)
-	for k, v := range m.kws {
-		if strings.Contains(s, k) {
-			return v, true
+	if v, ok = m.kws[s]; ok {
+		return
+	}
+	seen := make(map[byte]struct{}, len(m.byChar))
+	for i := range s {
+		c := s[i]
+		if _, ok := seen[c]; ok {
+			continue
+		}
+		seen[c] = struct{}{}
+		for _, kw := range m.byChar[c] {
+			if strings.Contains(s, kw) {
+				return m.kws[kw], true
+			}
 		}
 	}
-	return v, false
+	return
 }
 
 func (m *KeywordMatcher[T]) Len() int {
@@ -171,14 +212,16 @@ func (m *RegexMatcher[T]) Add(expr string, v T) error {
 }
 
 func (m *RegexMatcher[T]) Match(s string) (v T, ok bool) {
+	if len(m.regs) == 0 {
+		return
+	}
 	s = NormalizeDomain(s)
 	for _, e := range m.regs {
 		if e.reg.MatchString(s) {
 			return e.v, true
 		}
 	}
-	var zeroT T
-	return zeroT, false
+	return
 }
 
 func (m *RegexMatcher[T]) Len() int {

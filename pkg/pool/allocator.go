@@ -1,30 +1,66 @@
-/*
- * Copyright (C) 2020-2022, IrineSistiana
- *
- * This file is part of mosdns.
- *
- * mosdns is free software: you can redistribute it and/or modify
- * it under the terms of the GNU General Public License as published by
- * the Free Software Foundation, either version 3 of the License, or
- * (at your option) any later version.
- *
- * mosdns is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
- */
-
 package pool
 
 import (
-	bytesPool "github.com/IrineSistiana/go-bytes-pool"
+	"math/bits"
+	"sync"
 )
 
 var (
-	_pool      = bytesPool.NewPool(20) // 1Mb pool, should be enough.
-	GetBuf     = _pool.Get
-	ReleaseBuf = _pool.Release
+	GetBuf     func(size int) *[]byte
+	ReleaseBuf func(b *[]byte)
 )
+
+func init() {
+	p := newBufPool(20)
+	GetBuf = p.get
+	ReleaseBuf = p.release
+}
+
+type bufPool struct {
+	ps []sync.Pool
+}
+
+func newBufPool(bitLen int) *bufPool {
+	p := &bufPool{ps: make([]sync.Pool, bitLen+1)}
+	for i := range p.ps {
+		sz := (1 << i) - 1
+		p.ps[i] = sync.Pool{New: func() any { b := make([]byte, sz); return &b }}
+	}
+	return p
+}
+
+func (p *bufPool) get(size int) *[]byte {
+	idx := poolIndex(size)
+	if idx >= len(p.ps) {
+		b := make([]byte, size)
+		return &b
+	}
+	b := p.ps[idx].Get().(*[]byte)
+	*b = (*b)[:size]
+	return b
+}
+
+func (p *bufPool) release(b *[]byte) {
+	c := cap(*b)
+	idx := poolIndex(c)
+	if idx >= len(p.ps) {
+		return
+	}
+	if c != (1<<idx)-1 {
+		return
+	}
+	*b = (*b)[:c]
+	p.ps[idx].Put(b)
+}
+
+func poolIndex(size int) int {
+	if size <= 0 {
+		return 0
+	}
+	x := uint64(size + 1)
+	l := bits.Len64(x)
+	if x == 1<<(l-1) {
+		return l - 1
+	}
+	return l
+}
