@@ -64,57 +64,15 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 		metricsReg: newMetricsReg(),
 		sc:         safe_close.NewSafeClose(),
 	}
-	// This must be called after m.httpMux and m.metricsReg been set.
 	m.initHttpMux()
+	m.startHTTPServer(cfg)
+	m.registerPluginCloseHandler()
 
-	// Start http api server
-	if httpAddr := cfg.API.HTTP; len(httpAddr) > 0 {
-		httpServer := &http.Server{
-			Addr:    httpAddr,
-			Handler: m.httpMux,
-		}
-		m.sc.Attach(func(done func(), closeSignal <-chan struct{}) {
-			defer done()
-			errChan := make(chan error, 1)
-			go func() {
-				m.logger.Info("starting api http server", zap.String("addr", httpAddr))
-				errChan <- httpServer.ListenAndServe()
-			}()
-			select {
-			case err := <-errChan:
-				m.sc.SendCloseSignal(err)
-			case <-closeSignal:
-				_ = httpServer.Shutdown(context.Background())
-			}
-		})
-	}
-
-	// Load plugins.
-
-	// Close all plugins on signal.
-	// From here, call m.sc.SendCloseSignal() if any plugin failed to load.
-	m.sc.Attach(func(done func(), closeSignal <-chan struct{}) {
-		go func() {
-			defer done()
-			<-closeSignal
-			m.logger.Info("starting shutdown sequences")
-			for tag, p := range m.plugins {
-				if closer, _ := p.(io.Closer); closer != nil {
-					m.logger.Info("closing plugin", zap.String("tag", tag))
-					_ = closer.Close()
-				}
-			}
-			m.logger.Info("all plugins were closed")
-		}()
-	})
-
-	// Preset plugins
 	if err := m.loadPresetPlugins(); err != nil {
 		m.sc.SendCloseSignal(err)
 		_ = m.sc.WaitClosed()
 		return nil, err
 	}
-	// Plugins from config.
 	if err := m.loadPluginsFromCfg(cfg, 0); err != nil {
 		m.sc.SendCloseSignal(err)
 		_ = m.sc.WaitClosed()
@@ -123,7 +81,6 @@ func NewMosdns(cfg *Config) (*Mosdns, error) {
 	m.logger.Info("all plugins are loaded")
 
 	defer debug.FreeOSMemory()
-
 	m.logger.Info(fmt.Sprintf("pid=%d uid=%d gid=%d", os.Getpid(), os.Getuid(), os.Getgid()))
 
 	return m, nil
@@ -209,6 +166,46 @@ func (m *Mosdns) initHttpMux() {
 	}
 	m.httpMux.NotFound(invalidApiReqHelper)
 	m.httpMux.MethodNotAllowed(invalidApiReqHelper)
+}
+
+func (m *Mosdns) startHTTPServer(cfg *Config) {
+	if httpAddr := cfg.API.HTTP; len(httpAddr) > 0 {
+		httpServer := &http.Server{
+			Addr:    httpAddr,
+			Handler: m.httpMux,
+		}
+		m.sc.Attach(func(done func(), closeSignal <-chan struct{}) {
+			defer done()
+			errChan := make(chan error, 1)
+			go func() {
+				m.logger.Info("starting api http server", zap.String("addr", httpAddr))
+				errChan <- httpServer.ListenAndServe()
+			}()
+			select {
+			case err := <-errChan:
+				m.sc.SendCloseSignal(err)
+			case <-closeSignal:
+				_ = httpServer.Shutdown(context.Background())
+			}
+		})
+	}
+}
+
+func (m *Mosdns) registerPluginCloseHandler() {
+	m.sc.Attach(func(done func(), closeSignal <-chan struct{}) {
+		go func() {
+			defer done()
+			<-closeSignal
+			m.logger.Info("starting shutdown sequences")
+			for tag, p := range m.plugins {
+				if closer, _ := p.(io.Closer); closer != nil {
+					m.logger.Info("closing plugin", zap.String("tag", tag))
+					_ = closer.Close()
+				}
+			}
+			m.logger.Info("all plugins were closed")
+		}()
+	})
 }
 
 func (m *Mosdns) loadPresetPlugins() error {

@@ -249,8 +249,14 @@ func (ctx *Context) LogLine() string {
 		cacheStr = fmt.Sprintf("%dms", ctx.CacheDur.Milliseconds())
 	}
 
-	var status string
-	var rate string
+	status, rate := ctx.formatStatus()
+
+	return fmt.Sprintf("[%s] %s %s %s %s %s %s -> %s %s %s/%s %dms",
+		ts, status, rate, clientIP, protocol, qtype, qname, rcode, respIPs,
+		upstreamStr, cacheStr, totalDur.Milliseconds())
+}
+
+func (ctx *Context) formatStatus() (status string, rate string) {
 	if tag := ctx.blackHoleTag; tag != "" {
 		status = "blackhole(" + tag + ")"
 		rate = "-"
@@ -272,10 +278,7 @@ func (ctx *Context) LogLine() string {
 		status = "-"
 		rate = "-"
 	}
-
-	return fmt.Sprintf("[%s] %s %s %s %s %s %s -> %s %s %s/%s %dms",
-		ts, status, rate, clientIP, protocol, qtype, qname, rcode, respIPs,
-		upstreamStr, cacheStr, totalDur.Milliseconds())
+	return
 }
 
 func RecordCache(hit bool) {

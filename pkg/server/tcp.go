@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"sync"
 	"time"
 
 	"github.com/IrineSistiana/mosdns/v5/pkg/dnsutils"
@@ -83,6 +84,7 @@ func ServeTCP(l net.Listener, h Handler, opts TCPServerOpts) error {
 				proto = "TLS"
 			}
 
+			var writeMu sync.Mutex
 			firstRead := true
 			for {
 				if firstRead {
@@ -110,7 +112,10 @@ func ServeTCP(l net.Listener, h Handler, opts TCPServerOpts) error {
 					}
 					defer pool.ReleaseBuf(r)
 
-					if _, err := c.Write(*r); err != nil {
+					writeMu.Lock()
+					_, err := c.Write(*r)
+					writeMu.Unlock()
+					if err != nil {
 						logger.Warn("failed to write response", zap.Stringer("client", c.RemoteAddr()), zap.Error(err))
 						return
 					}
