@@ -20,7 +20,6 @@
 package ip_set
 
 import (
-	"bytes"
 	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
@@ -119,14 +118,12 @@ func LoadFromFiles(fs []string, l *netlist.List) error {
 }
 
 func LoadFromFile(f string, l *netlist.List) error {
-	if _, err := os.Stat(f); err != nil {
-		return fmt.Errorf("ip set file %s: %w", f, err)
-	}
-	b, err := os.ReadFile(f)
+	reader, err := os.Open(f)
 	if err != nil {
-		return fmt.Errorf("failed to read ip set file %s: %w", f, err)
+		return fmt.Errorf("failed to open ip set file %s: %w", f, err)
 	}
-	if err := netlist.LoadFromReader(l, bytes.NewReader(b)); err != nil {
+	defer reader.Close()
+	if err := netlist.LoadFromReader(l, reader); err != nil {
 		return fmt.Errorf("failed to parse ip set file %s: %w", f, err)
 	}
 	return nil

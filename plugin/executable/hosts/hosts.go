@@ -20,7 +20,6 @@
 package hosts
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
@@ -62,13 +61,15 @@ func NewHosts(args *Args) (*Hosts, error) {
 		}
 	}
 	for i, file := range args.Files {
-		b, err := os.ReadFile(file)
+		f, err := os.Open(file)
 		if err != nil {
-			return nil, fmt.Errorf("failed to read file #%d %s, %w", i, file, err)
+			return nil, fmt.Errorf("failed to open file #%d %s, %w", i, file, err)
 		}
-		if err := domain.LoadFromTextReader[*hosts.IPs](m, bytes.NewReader(b), hosts.ParseIPs); err != nil {
+		if err := domain.LoadFromTextReader[*hosts.IPs](m, f, hosts.ParseIPs); err != nil {
+			f.Close()
 			return nil, fmt.Errorf("failed to load file #%d %s, %w", i, file, err)
 		}
+		f.Close()
 	}
 
 	return &Hosts{

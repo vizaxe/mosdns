@@ -24,6 +24,13 @@ func SetDefaultVal(m *dns.Msg) *dns.Msg {
 
 // CopyMsgNoOpt deep copies m and excludes OPT records.
 func CopyMsgNoOpt(m *dns.Msg) *dns.Msg {
+	return copyMsgNoOptWithTTL(m, 0, false)
+}
+
+// copyMsgNoOptWithTTL deep copies m, excludes OPT records, and adjusts TTL in one pass.
+// If subtract is true, ttlDelta is subtracted from each RR's TTL.
+// If subtract is false, all RRs' TTL is set to ttlDelta.
+func copyMsgNoOptWithTTL(m *dns.Msg, ttlDelta uint32, subtract bool) *dns.Msg {
 	if m == nil {
 		return nil
 	}
@@ -37,29 +44,51 @@ func CopyMsgNoOpt(m *dns.Msg) *dns.Msg {
 		copy(m2.Question, m.Question)
 	}
 
-	lenExtra := len(m.Extra)
-	for _, r := range m.Extra {
-		if r.Header().Rrtype == dns.TypeOPT {
-			lenExtra--
+	m2.Answer = make([]dns.RR, len(m.Answer))
+	for i, r := range m.Answer {
+		cp := dns.Copy(r)
+		if subtract {
+			if ttl := cp.Header().Ttl; ttl > ttlDelta {
+				cp.Header().Ttl = ttl - ttlDelta
+			} else {
+				cp.Header().Ttl = 1
+			}
+		} else {
+			cp.Header().Ttl = ttlDelta
 		}
+		m2.Answer[i] = cp
+	}
+	m2.Ns = make([]dns.RR, len(m.Ns))
+	for i, r := range m.Ns {
+		cp := dns.Copy(r)
+		if subtract {
+			if ttl := cp.Header().Ttl; ttl > ttlDelta {
+				cp.Header().Ttl = ttl - ttlDelta
+			} else {
+				cp.Header().Ttl = 1
+			}
+		} else {
+			cp.Header().Ttl = ttlDelta
+		}
+		m2.Ns[i] = cp
 	}
 
-	s := make([]dns.RR, len(m.Answer)+len(m.Ns)+lenExtra)
-	m2.Answer, s = s[:0:len(m.Answer)], s[len(m.Answer):]
-	m2.Ns, s = s[:0:len(m.Ns)], s[len(m.Ns):]
-	m2.Extra = s[:0:lenExtra]
-
-	for _, r := range m.Answer {
-		m2.Answer = append(m2.Answer, dns.Copy(r))
-	}
-	for _, r := range m.Ns {
-		m2.Ns = append(m2.Ns, dns.Copy(r))
-	}
+	m2.Extra = make([]dns.RR, 0, len(m.Extra))
 	for _, r := range m.Extra {
 		if r.Header().Rrtype == dns.TypeOPT {
 			continue
 		}
-		m2.Extra = append(m2.Extra, dns.Copy(r))
+		cp := dns.Copy(r)
+		if subtract {
+			if ttl := cp.Header().Ttl; ttl > ttlDelta {
+				cp.Header().Ttl = ttl - ttlDelta
+			} else {
+				cp.Header().Ttl = 1
+			}
+		} else {
+			cp.Header().Ttl = ttlDelta
+		}
+		m2.Extra = append(m2.Extra, cp)
 	}
 	return m2
 }
@@ -97,14 +126,12 @@ func PrepareCachedResponse(item *Item, lazyCacheEnabled bool, lazyTtl int) (*dns
 	now := time.Now()
 
 	if now.Before(item.ExpirationTime) {
-		r := CopyMsgNoOpt(item.Resp)
-		dnsutils.SubtractTTL(r, uint32(now.Sub(item.StoredTime).Seconds()))
+		r := copyMsgNoOptWithTTL(item.Resp, uint32(now.Sub(item.StoredTime).Seconds()), true)
 		return r, false
 	}
 
 	if lazyCacheEnabled {
-		r := CopyMsgNoOpt(item.Resp)
-		dnsutils.SetTTL(r, uint32(lazyTtl))
+		r := copyMsgNoOptWithTTL(item.Resp, uint32(lazyTtl), false)
 		return r, true
 	}
 

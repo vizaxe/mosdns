@@ -246,7 +246,7 @@ func (dc *TraditionalDnsConn) queueLen() int {
 func (dc *TraditionalDnsConn) addQueueC() (qid uint16, c chan *[]byte) {
 	c = make(chan *[]byte)
 	dc.queueMu.Lock()
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 3; i++ {
 		qid = dc.nextQid
 		dc.nextQid++
 		if _, dup := dc.queue[uint32(qid)]; dup {

@@ -262,81 +262,70 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 		upDur time.Duration
 	}
 
-	resChan := make(chan res)
+	qName := qCtx.QQuestion().Name
+	qClass := qCtx.QQuestion().Qclass
+	qType := qCtx.QQuestion().Qtype
+
+	resChan := make(chan res, concurrent)
 	done := make(chan struct{})
 	defer close(done)
 
 	r := rand.IntN(len(us))
 	for i := 0; i < concurrent; i++ {
 		u := us[(r+i)%len(us)]
-		go func(uqid uint32, question dns.Question) {
+		go func(u *upstreamWrapper) {
 			upstreamCtx, cancel := context.WithTimeout(ctx, queryTimeout)
 			defer cancel()
 
-			var r *dns.Msg
 			start := time.Now()
 			respPayload, err := u.ExchangeContext(upstreamCtx, *queryPayload)
 			upDur := time.Since(start)
+			var resp *dns.Msg
 			if err != nil {
 				f.logger.Warn(
 					"upstream error",
-					zap.Uint32("uqid", uqid),
-					zap.String("qname", question.Name),
-					zap.Uint16("qclass", question.Qclass),
-					zap.Uint16("qtype", question.Qtype),
+					zap.Uint32("uqid", qCtx.Id()),
+					zap.String("qname", qName),
+					zap.Uint16("qclass", qClass),
+					zap.Uint16("qtype", qType),
 					zap.String("upstream", u.name()),
 					zap.Error(err),
 				)
 			} else {
-				r = new(dns.Msg)
-				err = r.Unpack(*respPayload)
-				pool.ReleaseBuf(respPayload)
-				if err != nil {
-					r = nil
+				resp = new(dns.Msg)
+				if unpackErr := resp.Unpack(*respPayload); unpackErr != nil {
+					err = unpackErr
+					resp = nil
 				}
+				pool.ReleaseBuf(respPayload)
 			}
 			select {
-			case resChan <- res{r: r, err: err, upDur: upDur}:
+			case resChan <- res{r: resp, err: err, upDur: upDur}:
 			case <-done:
 			}
-		}(qCtx.Id(), qCtx.QQuestion())
+		}(u)
 	}
 
+	var lastErr error
 	for i := 0; i < concurrent; i++ {
 		select {
 		case res := <-resChan:
-			r, err := res.r, res.err
-			if err != nil {
+			if res.err != nil {
+				lastErr = res.err
 				continue
 			}
-
-			// Retry until the last
-			if i < concurrent-1 && r.Rcode != dns.RcodeSuccess && r.Rcode != dns.RcodeNameError {
-				continue
+			r := res.r
+			if r.Rcode == dns.RcodeSuccess || r.Rcode == dns.RcodeNameError {
+				qCtx.UpstreamDur = res.upDur
+				return r, nil
 			}
-			qCtx.UpstreamDur = res.upDur
-			return r, nil
+			lastErr = nil
 		case <-ctx.Done():
 			return nil, context.Cause(ctx)
 		}
 	}
-
-	for i := 0; i < concurrent; i++ {
-		select {
-		case res := <-resChan:
-			r, err := res.r, res.err
-			if err != nil {
-				continue
-			}
-
-			// Retry until the last
-			if i < concurrent-1 && r.Rcode != dns.RcodeSuccess && r.Rcode != dns.RcodeNameError {
-				continue
-			}
-			return r, nil
-		case <-ctx.Done():
-			return nil, context.Cause(ctx)
-		}
+	if lastErr != nil {
+		return nil, lastErr
 	}
 	return nil, errors.New("all upstream servers failed")
 }

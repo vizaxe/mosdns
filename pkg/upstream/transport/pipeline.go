@@ -32,7 +32,7 @@ import (
 type PipelineTransport struct {
 	m      sync.Mutex // protect following fields
 	closed bool
-	conns  map[*lazyDnsConn]struct{}
+	conns  []*lazyDnsConn
 
 	dialFunc         func(ctx context.Context) (DnsConn, error)
 	dialTimeout      time.Duration
@@ -60,7 +60,7 @@ type PipelineOpts struct {
 
 func NewPipelineTransport(opt PipelineOpts) *PipelineTransport {
 	t := &PipelineTransport{
-		conns: make(map[*lazyDnsConn]struct{}),
+		conns: make([]*lazyDnsConn, 0, 4),
 	}
 	t.dialFunc = opt.DialContext
 	setDefaultGZ(&t.dialTimeout, opt.DialTimeout, defaultDialTimeout)
@@ -101,9 +101,10 @@ func (t *PipelineTransport) Close() error {
 		return nil
 	}
 	t.closed = true
-	for conn := range t.conns {
+	for _, conn := range t.conns {
 		conn.Close()
 	}
+	t.conns = nil
 	return nil
 }
 
@@ -116,30 +117,31 @@ func (t *PipelineTransport) getReservedExchanger() (_ ReservedExchanger, isNewCo
 	}
 
 	var rxc ReservedExchanger
-	const maxReserveAttempt = 16
-	reserveAttempt := 0
-	for c := range t.conns {
+	// Rebuild the slice in-place, removing closed connections.
+	alive := t.conns[:0]
+	for _, c := range t.conns {
 		var closed bool
-		rxc, closed = c.ReserveNewQuery()
-		if closed {
-			delete(t.conns, c)
-		}
-		if rxc != nil {
-			break
+		if rxc == nil {
+			rxc, closed = c.ReserveNewQuery()
 		} else {
-			reserveAttempt++
-			if reserveAttempt > maxReserveAttempt {
-				break
-			}
+			_, closed = c.ReserveNewQuery()
+		}
+		if !closed {
+			alive = append(alive, c)
 		}
 	}
+	// Clear trailing references to avoid GC pinning.
+	for i := len(alive); i < len(t.conns); i++ {
+		t.conns[i] = nil
+	}
+	t.conns = alive
 
-	// Dial a new connection
+	// Dial a new connection if none is available.
 	if rxc == nil {
 		c := newLazyDnsConn(t.dialFunc, t.dialTimeout, t.maxLazyConnQueue, t.logger)
 		rxc, _ = c.ReserveNewQuery() // ignore the closed error for new lazy connection
 		isNewConn = true
-		t.conns[c] = struct{}{}
+		t.conns = append(t.conns, c)
 	}
 	t.m.Unlock()
 

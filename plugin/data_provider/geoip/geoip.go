@@ -27,7 +27,6 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/ip_set"
 	"net/netip"
-	"runtime/debug"
 	"strings"
 )
 
@@ -43,10 +42,6 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		return nil, err
 	}
 	return m, nil
-}
-
-func (geoip V2rayGeoip) CleanUp() {
-	geofile.CleanUp()
 }
 
 type Args struct {
@@ -113,7 +108,6 @@ func LoadFile(file string, code string, l *netlist.List) error {
 			l.Append(prefix)
 		}
 	}
-	defer debug.FreeOSMemory()
 	return nil
 }
 

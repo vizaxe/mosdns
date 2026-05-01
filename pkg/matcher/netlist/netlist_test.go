@@ -151,7 +151,6 @@ func Test_Contains(t *testing.T) {
 		{"", netip.MustParseAddr("104.21.51.61"), true},
 	}
 	for _, tt := range tests {
-		match := ipNetList.Match(tt.testIP)
 		t.Run(tt.name, func(tx *testing.T) {
 			if got := ipNetList.Match(tt.testIP); got != tt.want {
 				t.Errorf("IPNetList.Match() = %v, want %v", got, tt.want)

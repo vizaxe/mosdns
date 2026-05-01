@@ -26,7 +26,6 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/domain_set"
-	"runtime/debug"
 	"strings"
 )
 
@@ -42,10 +41,6 @@ func Init(bp *coremain.BP, args any) (any, error) {
 		return nil, err
 	}
 	return m, nil
-}
-
-func (geosite V2rayGeosite) CleanUp() {
-	geofile.CleanUp()
 }
 
 type Args struct {
@@ -118,7 +113,6 @@ func LoadFile(file string, code string, m *domain.MixMatcher[struct{}]) error {
 			}
 		}
 	}
-	defer debug.FreeOSMemory()
 	return nil
 }
 

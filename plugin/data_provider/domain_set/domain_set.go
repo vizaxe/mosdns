@@ -20,7 +20,6 @@
 package domain_set
 
 import (
-	"bytes"
 	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
@@ -110,14 +109,12 @@ func LoadFiles(fs []string, m *domain.MixMatcher[struct{}]) error {
 }
 
 func LoadFile(f string, m *domain.MixMatcher[struct{}]) error {
-	if _, err := os.Stat(f); err != nil {
-		return fmt.Errorf("domain file %s: %w", f, err)
-	}
-	b, err := os.ReadFile(f)
+	reader, err := os.Open(f)
 	if err != nil {
-		return fmt.Errorf("failed to read domain file %s: %w", f, err)
+		return fmt.Errorf("failed to open domain file %s: %w", f, err)
 	}
-	if err := domain.LoadFromTextReader[struct{}](m, bytes.NewReader(b), nil); err != nil {
+	defer reader.Close()
+	if err := domain.LoadFromTextReader[struct{}](m, reader, nil); err != nil {
 		return fmt.Errorf("failed to parse domain file %s: %w", f, err)
 	}
 	return nil

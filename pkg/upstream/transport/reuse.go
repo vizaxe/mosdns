@@ -120,52 +120,30 @@ func (t *ReuseConnTransport) ExchangeContext(ctx context.Context, m []byte) (*[]
 	}
 }
 
-// getNewConn dial a *reusableConn.
+// getNewConn dial a *reusableConn synchronously.
 // The caller must call releaseReusableConn to release the reusableConn.
 func (t *ReuseConnTransport) getNewConn(ctx context.Context) (*reusableConn, error) {
-	callCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	type dialRes struct {
-		c   *reusableConn
-		err error
-	}
-	dialChan := make(chan dialRes)
-	go func() {
-		dialCtx, cancelDial := context.WithTimeout(t.ctx, t.dialTimeout)
-		defer cancelDial()
-
-		var rc *reusableConn
-		c, err := t.dialFunc(dialCtx)
-		if err != nil {
-			t.logger.Check(zap.WarnLevel, "fail to dial reusable conn").Write(zap.Error(err))
-		}
-		if c != nil {
-			rc = t.newReusableConn(c)
-			if rc == nil { // transport closed
-				c.Close()
-				rc = nil
-				err = ErrClosedTransport
-			}
-		}
-
-		select {
-		case dialChan <- dialRes{c: rc, err: err}:
-		case <-callCtx.Done(): // caller canceled getNewConn() call
-			if rc != nil { // put this conn to pool
-				t.setIdle(rc)
-			}
-		}
-	}()
-
 	select {
-	case <-callCtx.Done():
-		return nil, context.Cause(ctx)
 	case <-t.ctx.Done():
 		return nil, context.Cause(t.ctx)
-	case res := <-dialChan:
-		return res.c, res.err
+	default:
 	}
+
+	dialCtx, cancel := context.WithTimeout(ctx, t.dialTimeout)
+	defer cancel()
+
+	c, err := t.dialFunc(dialCtx)
+	if err != nil {
+		t.logger.Check(zap.WarnLevel, "fail to dial reusable conn").Write(zap.Error(err))
+		return nil, err
+	}
+
+	rc := t.newReusableConn(c)
+	if rc == nil { // transport closed
+		c.Close()
+		return nil, ErrClosedTransport
+	}
+	return rc, nil
 }
 
 func (t *ReuseConnTransport) setIdle(c *reusableConn) {
