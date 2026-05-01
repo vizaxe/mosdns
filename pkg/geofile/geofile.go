@@ -36,13 +36,17 @@ func LoadSite(file, code string) ([]*Domain, error) {
 }
 
 func findEntry(file string, code []byte) ([]byte, error) {
+	if _, err := os.Stat(file); err != nil {
+		return nil, fmt.Errorf("geo file %s: %w", file, err)
+	}
+
 	f, err := os.Open(file)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
 
-	br := bufio.NewReader(f)
+	br := bufio.NewReaderSize(f, 65536)
 
 	for {
 		_, err := br.ReadByte()

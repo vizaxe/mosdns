@@ -110,15 +110,15 @@ func LoadFiles(fs []string, m *domain.MixMatcher[struct{}]) error {
 }
 
 func LoadFile(f string, m *domain.MixMatcher[struct{}]) error {
-	if len(f) > 0 {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			return err
-		}
-
-		if err := domain.LoadFromTextReader[struct{}](m, bytes.NewReader(b), nil); err != nil {
-			return err
-		}
+	if _, err := os.Stat(f); err != nil {
+		return fmt.Errorf("domain file %s: %w", f, err)
+	}
+	b, err := os.ReadFile(f)
+	if err != nil {
+		return fmt.Errorf("failed to read domain file %s: %w", f, err)
+	}
+	if err := domain.LoadFromTextReader[struct{}](m, bytes.NewReader(b), nil); err != nil {
+		return fmt.Errorf("failed to parse domain file %s: %w", f, err)
 	}
 	return nil
 }

@@ -21,6 +21,7 @@ package dnsmasq_dhcp_leases
 
 import (
 	"context"
+	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
@@ -71,23 +72,15 @@ func Init(bp *coremain.BP, args any) (any, error) {
 }
 
 func NewLeases(bp *coremain.BP, args *Args) (*Leases, error) {
-	leases := make(chan []*dnsmasq.Lease)
-	file, err := os.Open(args.File)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-	readLeases, err := dnsmasq.ReadLeases(file)
-	if err != nil {
-		return nil, err
+	if _, err := os.Stat(args.File); err != nil {
+		return nil, fmt.Errorf("dnsmasq lease file %s: %w", args.File, err)
 	}
 
 	l := &Leases{
 		args:      args,
 		logger:    bp.L(),
 		file:      args.File,
-		leases:    readLeases,
-		leaseChan: leases,
+		leaseChan: make(chan []*dnsmasq.Lease),
 	}
 
 	if len(strings.TrimSpace(args.CacheTag)) > 0 {
@@ -95,19 +88,19 @@ func NewLeases(bp *coremain.BP, args *Args) (*Leases, error) {
 		l.cache = redisCache
 	}
 
+	go dnsmasq.WatchLeases(context.Background(), l.file, l.leaseChan)
+
+	firstBatch := <-l.leaseChan
+	l.leases = firstBatch
 	l.buildMatchers()
-	go l.start()
+
+	go l.watch()
 	return l, nil
 }
 
-func (l *Leases) start() {
-	go dnsmasq.WatchLeases(context.Background(), l.file, l.leaseChan)
+func (l *Leases) watch() {
 	for leaseBatch := range l.leaseChan {
-		newLeases := make([]*dnsmasq.Lease, 0)
-		for _, lease := range leaseBatch {
-			newLeases = append(newLeases, lease)
-		}
-		l.leases = newLeases
+		l.leases = leaseBatch
 		l.buildMatchers()
 	}
 }
@@ -160,15 +153,16 @@ func (l *Leases) buildMatchers() {
 	}
 	l.matcher = m
 
-	// init cache data
-	l.cache.Clean()
-	for fqdn := range ipMap {
-		l.saveCache(fqdn, dns.TypeA)
-		l.saveCache(fqdn, dns.TypeAAAA)
-	}
-	for _, lease := range l.leases {
-		addr := lease.IPAddr
-		l.savePtr2Cache(addr)
+	if l.cache != nil {
+		l.cache.Clean()
+		for fqdn := range ipMap {
+			l.saveCache(fqdn, dns.TypeA)
+			l.saveCache(fqdn, dns.TypeAAAA)
+		}
+		for _, lease := range l.leases {
+			addr := lease.IPAddr
+			l.savePtr2Cache(addr)
+		}
 	}
 }
 

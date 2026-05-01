@@ -21,6 +21,7 @@ package reverselookup
 
 import (
 	"context"
+	"fmt"
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
 	"github.com/IrineSistiana/mosdns/v5/pkg/query_context"
@@ -29,7 +30,7 @@ import (
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/cache/redis_cache"
 	"github.com/IrineSistiana/mosdns/v5/plugin/executable/sequence"
 	"github.com/miekg/dns"
-	"net/netip"
+	"strings"
 )
 
 const (
@@ -63,10 +64,20 @@ func Init(bp *coremain.BP, args any) (any, error) {
 
 func NewReverseLookup(bp *coremain.BP, args *Args) (any, error) {
 	args.init()
-	c := bp.M().GetPlugin(args.CacheTag).(*redis_cache.RedisCache)
+	if len(strings.TrimSpace(args.CacheTag)) == 0 {
+		return nil, fmt.Errorf("redis_reverse_lookup: cache_tag is required")
+	}
+	c := bp.M().GetPlugin(args.CacheTag)
+	if c == nil {
+		return nil, fmt.Errorf("redis_reverse_lookup: plugin %s not found", args.CacheTag)
+	}
+	redisCache, ok := c.(*redis_cache.RedisCache)
+	if !ok {
+		return nil, fmt.Errorf("redis_reverse_lookup: plugin %s is not a redis_cache", args.CacheTag)
+	}
 	p := &ReverseLookup{
 		args:  args,
-		cache: c,
+		cache: redisCache,
 	}
 	return p, nil
 }
@@ -107,11 +118,4 @@ func (p *ReverseLookup) saveIPs(q, r *dns.Msg) {
 		return
 	}
 	p.cache.StoreDns(q, r)
-}
-
-func as16(n netip.Addr) netip.Addr {
-	if n.Is6() {
-		return n
-	}
-	return netip.AddrFrom16(n.As16())
 }

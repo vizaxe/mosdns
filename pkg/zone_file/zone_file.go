@@ -20,6 +20,7 @@
 package zone_file
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"strings"
@@ -32,13 +33,20 @@ type Matcher struct {
 }
 
 func (m *Matcher) LoadFile(s string) error {
+	if _, err := os.Stat(s); err != nil {
+		return fmt.Errorf("zone file %s: %w", s, err)
+	}
+
 	f, err := os.Open(s)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	return m.Load(f)
+	if err := m.Load(f); err != nil {
+		return fmt.Errorf("failed to parse zone file %s: %w", s, err)
+	}
+	return nil
 }
 
 func (m *Matcher) Load(r io.Reader) error {

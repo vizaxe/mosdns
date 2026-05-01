@@ -27,6 +27,9 @@ func setDefaultVal(m *dns.Msg) *dns.Msg {
 }
 
 func (l *Leases) saveCache(fqdn string, qtype uint16) {
+	if l.cache == nil {
+		return
+	}
 	questions := make([]dns.Question, 0)
 	questions = append(questions, dns.Question{
 		Name:   fqdn,
@@ -43,6 +46,9 @@ func (l *Leases) saveCache(fqdn string, qtype uint16) {
 }
 
 func (l *Leases) savePtr2Cache(addr netip.Addr) {
+	if l.cache == nil {
+		return
+	}
 	fqdn := dnsutils.Ip2PtrFqdn(addr)
 	if len(strings.TrimSpace(fqdn)) > 0 {
 		questions := make([]dns.Question, 0)
@@ -85,8 +91,12 @@ func (l *Leases) responsePtr(m *dns.Msg) *dns.Msg {
 			lease := l.ipv4Leases[i]
 			ipAddr := lease.IPAddr
 			if ipAddr.Compare(addr) == 0 {
+				ttlDuration := lease.Expires.Sub(time.Now())
+				if ttlDuration < 0 {
+					ttlDuration = 0
+				}
 				name = lease.Hostname
-				ttl = lease.Expires.Sub(time.Now())
+				ttl = ttlDuration
 				break
 			}
 		}
@@ -95,8 +105,12 @@ func (l *Leases) responsePtr(m *dns.Msg) *dns.Msg {
 			lease := l.ipv6Leases[i]
 			ipAddr := lease.IPAddr
 			if ipAddr.Compare(addr) == 0 {
+				ttlDuration := lease.Expires.Sub(time.Now())
+				if ttlDuration < 0 {
+					ttlDuration = 0
+				}
 				name = lease.Hostname
-				ttl = lease.Expires.Sub(time.Now())
+				ttl = ttlDuration
 				break
 			}
 		}

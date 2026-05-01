@@ -32,6 +32,7 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
 )
 
 const PluginType = "query_from_shell"
@@ -98,14 +99,14 @@ func (b *queryFromShell) response(m *dns.Msg) *dns.Msg {
 
 	cmdLine := b.args.Cmd
 
-	// 要执行的命令
-	cmd := exec.Command("sh", "-c", cmdLine)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	// 创建一个缓冲区来捕获命令的输出
+	cmd := exec.CommandContext(ctx, "sh", "-c", cmdLine)
+
 	var out bytes.Buffer
 	cmd.Stdout = &out
 
-	// 执行命令
 	err := cmd.Run()
 	if err != nil {
 		return nil

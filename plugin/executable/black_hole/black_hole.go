@@ -115,14 +115,14 @@ func NewBlackHole(logger *zap.Logger, tag string, args *Args) (*BlackHole, error
 }
 
 func loadFromFile(f string) ([]string, error) {
-	if len(f) > 0 {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			return nil, err
-		}
-		return loadFromReader(bytes.NewReader(b))
+	if len(f) == 0 {
+		return nil, fmt.Errorf("empty file path")
 	}
-	return nil, fmt.Errorf("file not found")
+	b, err := os.ReadFile(f)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read ip file %s: %w", f, err)
+	}
+	return loadFromReader(bytes.NewReader(b))
 }
 
 // Exec implements sequence.Executable. It set a response with given ips if

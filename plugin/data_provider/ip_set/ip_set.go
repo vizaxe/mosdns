@@ -119,14 +119,15 @@ func LoadFromFiles(fs []string, l *netlist.List) error {
 }
 
 func LoadFromFile(f string, l *netlist.List) error {
-	if len(f) > 0 {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			return err
-		}
-		if err := netlist.LoadFromReader(l, bytes.NewReader(b)); err != nil {
-			return err
-		}
+	if _, err := os.Stat(f); err != nil {
+		return fmt.Errorf("ip set file %s: %w", f, err)
+	}
+	b, err := os.ReadFile(f)
+	if err != nil {
+		return fmt.Errorf("failed to read ip set file %s: %w", f, err)
+	}
+	if err := netlist.LoadFromReader(l, bytes.NewReader(b)); err != nil {
+		return fmt.Errorf("failed to parse ip set file %s: %w", f, err)
 	}
 	return nil
 }

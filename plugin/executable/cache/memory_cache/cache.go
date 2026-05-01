@@ -270,14 +270,17 @@ func (c *MemoryCache) loadDump() error {
 	if len(c.args.DumpFile) == 0 {
 		return nil
 	}
+	if _, err := os.Stat(c.args.DumpFile); err != nil {
+		return fmt.Errorf("cache dump file %s: %w", c.args.DumpFile, err)
+	}
 	f, err := os.Open(c.args.DumpFile)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to open cache dump %s: %w", c.args.DumpFile, err)
 	}
 	defer f.Close()
 	en, err := c.readDump(f)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to read cache dump %s: %w", c.args.DumpFile, err)
 	}
 	c.logger.Info("cache dump loaded", zap.Int("entries", en))
 	return nil

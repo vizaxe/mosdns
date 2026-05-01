@@ -13,14 +13,14 @@ import (
 )
 
 func loadFromFile(f string) ([]string, error) {
-	if len(f) > 0 {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			return nil, err
-		}
-		return loadFromReader(bytes.NewReader(b))
+	if len(f) == 0 {
+		return nil, fmt.Errorf("empty file path")
 	}
-	return nil, fmt.Errorf("file not found")
+	b, err := os.ReadFile(f)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read ip file %s: %w", f, err)
+	}
+	return loadFromReader(bytes.NewReader(b))
 }
 
 // LoadFromReader loads IP list from a reader.
@@ -81,15 +81,15 @@ func loadFiles(fs []string, m *domain.MixMatcher[struct{}]) error {
 }
 
 func LoadFile(f string, m *domain.MixMatcher[struct{}]) error {
-	if len(f) > 0 {
-		b, err := os.ReadFile(f)
-		if err != nil {
-			return err
-		}
-
-		if err := domain.LoadFromTextReader[struct{}](m, bytes.NewReader(b), nil); err != nil {
-			return err
-		}
+	if len(f) == 0 {
+		return fmt.Errorf("empty file path")
+	}
+	b, err := os.ReadFile(f)
+	if err != nil {
+		return fmt.Errorf("failed to read domain file %s: %w", f, err)
+	}
+	if err := domain.LoadFromTextReader[struct{}](m, bytes.NewReader(b), nil); err != nil {
+		return fmt.Errorf("failed to load domain file %s: %w", f, err)
 	}
 	return nil
 }

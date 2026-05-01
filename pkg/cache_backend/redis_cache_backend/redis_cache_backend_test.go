@@ -21,10 +21,11 @@ package redis_cache_backend
 
 import (
 	"fmt"
-	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
-	"github.com/redis/go-redis/v9"
 	"testing"
 	"time"
+
+	"github.com/IrineSistiana/mosdns/v5/pkg/cache_backend"
+	"github.com/redis/go-redis/v9"
 )
 
 var _ cache_backend.CacheBackend[cache_backend.StringKey, string] = (*RedisCache[cache_backend.StringKey, string])(nil)
@@ -38,7 +39,7 @@ var _ cache_backend.CacheBackend[cache_backend.StringKey, string] = (*RedisCache
 //}
 
 func TestRedisCache_Get(t *testing.T) {
-	url := "unix:///dev/shm/redis.sock?db=1"
+	url := "redis://localhost:6379/6"
 	c, err := NewRedisCache(url)
 	if err != nil {
 		t.Fatal(fmt.Errorf("invalid redis url, %w", err))
@@ -51,7 +52,7 @@ func TestRedisCache_Get(t *testing.T) {
 }
 
 func TestRedisCache_Store(t *testing.T) {
-	url := "unix:///dev/shm/redis.sock?db=1"
+	url := "redis://localhost:6379/6"
 	opt, err := redis.ParseURL(url)
 	if err != nil {
 		t.Fatal(fmt.Errorf("invalid redis url, %w", err))

@@ -120,6 +120,12 @@ func (b *networkInterface) response(m *dns.Msg) *dns.Msg {
 				ip = v.IP
 			case *net.IPAddr:
 				ip = v.IP
+			default:
+				continue
+			}
+
+			if ip == nil {
+				continue
 			}
 
 			addr, ok := netip.AddrFromSlice(ip)
@@ -131,6 +137,8 @@ func (b *networkInterface) response(m *dns.Msg) *dns.Msg {
 				}
 			}
 		}
+
+		break
 	}
 
 	if len(ipv4)+len(ipv6) == 0 {
