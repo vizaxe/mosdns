@@ -52,7 +52,7 @@ func GetMinimalTTL(m *dns.Msg) uint32 {
 // GetMaximalTTL returns the maximal ttl of this msg.
 // If msg m has no record, it returns 0.
 func GetMaximalTTL(m *dns.Msg) uint32 {
-	maxTTL := ^uint32(0)
+	var maxTTL uint32
 	hasRecord := false
 	for _, section := range [...][]dns.RR{m.Answer, m.Ns, m.Extra} {
 		for _, rr := range section {
@@ -156,7 +156,7 @@ func GenEmptyReply(q *dns.Msg, rcode int) *dns.Msg {
 	r.SetRcode(q, rcode)
 
 	var name string
-	if len(q.Question) > 1 {
+	if len(q.Question) > 0 {
 		name = q.Question[0].Name
 	} else {
 		name = "."

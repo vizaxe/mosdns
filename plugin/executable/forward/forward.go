@@ -257,8 +257,9 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 	}
 
 	type res struct {
-		r   *dns.Msg
-		err error
+		r     *dns.Msg
+		err   error
+		upDur time.Duration
 	}
 
 	resChan := make(chan res)
@@ -275,7 +276,7 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 			var r *dns.Msg
 			start := time.Now()
 			respPayload, err := u.ExchangeContext(upstreamCtx, *queryPayload)
-			qCtx.UpstreamDur = time.Since(start)
+			upDur := time.Since(start)
 			if err != nil {
 				f.logger.Warn(
 					"upstream error",
@@ -295,10 +296,29 @@ func (f *Forward) exchange(ctx context.Context, qCtx *query_context.Context, us 
 				}
 			}
 			select {
-			case resChan <- res{r: r, err: err}:
+			case resChan <- res{r: r, err: err, upDur: upDur}:
 			case <-done:
 			}
 		}(qCtx.Id(), qCtx.QQuestion())
+	}
+
+	for i := 0; i < concurrent; i++ {
+		select {
+		case res := <-resChan:
+			r, err := res.r, res.err
+			if err != nil {
+				continue
+			}
+
+			// Retry until the last
+			if i < concurrent-1 && r.Rcode != dns.RcodeSuccess && r.Rcode != dns.RcodeNameError {
+				continue
+			}
+			qCtx.UpstreamDur = res.upDur
+			return r, nil
+		case <-ctx.Done():
+			return nil, context.Cause(ctx)
+		}
 	}
 
 	for i := 0; i < concurrent; i++ {
