@@ -20,6 +20,7 @@
 package doh
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/binary"
@@ -38,6 +39,12 @@ import (
 
 const (
 	defaultDoHTimeout = time.Second * 6
+
+	// maxGetURLLen is the maximum length of the GET request URL query string.
+	// If the base64-encoded DNS query exceeds this length, POST method will be used
+	// to avoid "414 Request-URI Too Large" errors from some DoH servers (e.g. Google).
+	// RFC 8484 allows both GET and POST; POST has no URL length limitation.
+	maxGetURLLen = 2000
 )
 
 var nopLogger = zap.NewNop()
@@ -89,14 +96,6 @@ func (u *Upstream) ExchangeContext(ctx context.Context, q []byte) (*[]byte, erro
 	wire[1] = 0
 
 	queryLen := 4 + base64.RawURLEncoding.EncodedLen(len(wire))
-	queryBuf := make([]byte, queryLen)
-
-	p := 0
-	p += copy(queryBuf, "dns=")
-
-	// Padding characters for base64url MUST NOT be included.
-	// See: https://tools.ietf.org/html/rfc8484#section-6.
-	base64.RawURLEncoding.Encode(queryBuf[p:], wire)
 
 	type res struct {
 		r   *[]byte
@@ -111,7 +110,25 @@ func (u *Upstream) ExchangeContext(ctx context.Context, q []byte) (*[]byte, erro
 		// reduces the connection reuse efficiency.
 		ctx, cancel := context.WithTimeout(context.Background(), defaultDoHTimeout)
 		defer cancel()
-		r, err := u.exchange(ctx, utils.BytesToStringUnsafe(queryBuf))
+
+		var r *[]byte
+		var err error
+		if queryLen > maxGetURLLen {
+			// Use POST for large queries to avoid "414 Request-URI Too Large".
+			body := make([]byte, len(wire))
+			copy(body, wire)
+			r, err = u.exchangePost(ctx, body)
+		} else {
+			queryBuf := make([]byte, queryLen)
+			p := 0
+			p += copy(queryBuf, "dns=")
+
+			// Padding characters for base64url MUST NOT be included.
+			// See: https://tools.ietf.org/html/rfc8484#section-6.
+			base64.RawURLEncoding.Encode(queryBuf[p:], wire)
+			r, err = u.exchange(ctx, utils.BytesToStringUnsafe(queryBuf))
+		}
+
 		if err != nil {
 			u.logger.Check(zap.WarnLevel, "exchange failed").Write(zap.Error(err))
 		}
@@ -136,6 +153,22 @@ func (u *Upstream) exchange(ctx context.Context, dnsQuery string) (*[]byte, erro
 	req.URL = new(urlpkg.URL)
 	*req.URL = *u.urlTemplate
 	req.URL.RawQuery = dnsQuery
+	return u.doHTTPRequest(ctx, req)
+}
+
+func (u *Upstream) exchangePost(ctx context.Context, body []byte) (*[]byte, error) {
+	req := u.reqTemplate.WithContext(ctx)
+	req.Method = http.MethodPost
+	req.URL = new(urlpkg.URL)
+	*req.URL = *u.urlTemplate
+	req.URL.RawQuery = ""
+	req.Body = io.NopCloser(bytes.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.Header.Set("Content-Type", "application/dns-message")
+	return u.doHTTPRequest(ctx, req)
+}
+
+func (u *Upstream) doHTTPRequest(ctx context.Context, req *http.Request) (*[]byte, error) {
 	resp, err := u.rt.RoundTrip(req)
 	if err != nil {
 		return nil, fmt.Errorf("http request failed: %w", err)
