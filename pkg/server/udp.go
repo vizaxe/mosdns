@@ -143,12 +143,18 @@ func ServeUnix(c *net.UnixConn, h Handler, opts UDPServerOpts) error {
 			continue
 		}
 
+		if addr == nil {
+			logger.Warn("missing client addr, drop query")
+			continue
+		}
+
 		// handle query
 		go func() {
 			payload := h.Handle(listenerCtx, q, QueryMeta{ClientAddr: netip.Addr{}, Protocol: "unixgram"}, pool.PackBuffer)
 			if payload == nil {
 				return
 			}
+			defer pool.ReleaseBuf(payload)
 			if _, err := c.WriteToUnix(*payload, addr); err != nil {
 				logger.Warn("failed to write response", zap.Error(err))
 			}

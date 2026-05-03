@@ -41,7 +41,17 @@ func PackBuffer(m *dns.Msg) (*[]byte, error) {
 		ReleaseBuf(buf)
 		return nil, err
 	}
-	*buf = (*buf)[:len(wire)]
+	l := len(wire)
+	if l > dns.MaxMsgSize {
+		ReleaseBuf(buf)
+		return nil, fmt.Errorf("dns payload size %d is too large", l)
+	}
+	if cap(*buf) < l {
+		*buf = make([]byte, l)
+	} else {
+		*buf = (*buf)[:l]
+	}
+	copy(*buf, wire)
 	return buf, nil
 }
 
@@ -63,7 +73,12 @@ func PackTCPBuffer(m *dns.Msg) (*[]byte, error) {
 	}
 
 	totalLen := 2 + l
-	*buf = (*buf)[:totalLen]
+	if cap(*buf) < totalLen {
+		*buf = make([]byte, totalLen)
+	} else {
+		*buf = (*buf)[:totalLen]
+	}
 	binary.BigEndian.PutUint16(*buf, uint16(l))
+	copy((*buf)[2:], wire)
 	return buf, nil
 }
