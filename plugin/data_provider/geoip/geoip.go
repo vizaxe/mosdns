@@ -20,14 +20,18 @@
 package geoip
 
 import (
+	"context"
 	"fmt"
+	"net/netip"
+	"strings"
+	"sync"
+
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/geofile"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/netlist"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/ip_set"
-	"net/netip"
-	"strings"
+	"go.uber.org/zap"
 )
 
 const PluginType = "geoip"
@@ -47,44 +51,120 @@ func Init(bp *coremain.BP, args any) (any, error) {
 type Args struct {
 	Files []string `yaml:"files"`
 	Ips   []string `yaml:"ips"`
+	Watch bool     `yaml:"watch"`
 }
 
 var _ data_provider.IPMatcherProvider = (*V2rayGeoip)(nil)
 
 type V2rayGeoip struct {
+	mu sync.RWMutex
 	mg []netlist.Matcher
+
+	watch  bool
+	files  []string
+	ips    []string
+	logger *zap.Logger
+	cancel context.CancelFunc
 }
 
 func (d *V2rayGeoip) GetIPMatcher() netlist.Matcher {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	return MatcherGroup(d.mg)
 }
 
 func NewV2rayGeoip(bp *coremain.BP, args *Args) (*V2rayGeoip, error) {
-	v2gs := &V2rayGeoip{}
+	v := &V2rayGeoip{
+		watch:  args.Watch,
+		files:  args.Files,
+		ips:    args.Ips,
+		logger: bp.L(),
+	}
 
-	l := netlist.NewList()
+	mg, err := loadGeoipMatchers(args.Files, args.Ips)
+	if err != nil {
+		return nil, err
+	}
+	v.mg = mg
 
-	if args.Files != nil {
-		for _, file := range args.Files {
-			split := strings.Split(file, ":")
-			file := split[0]
-			code := split[1]
+	if args.Watch {
+		v.startWatchers()
+	}
+
+	return v, nil
+}
+
+func loadGeoipMatchers(files []string, ips []string) ([]netlist.Matcher, error) {
+	var mg []netlist.Matcher
+
+	fileCodes := make(map[string][]string)
+	for _, f := range files {
+		split := strings.Split(f, ":")
+		if len(split) != 2 {
+			return nil, fmt.Errorf("invalid file format %s, want path:code", f)
+		}
+		fileCodes[split[0]] = append(fileCodes[split[0]], split[1])
+	}
+
+	for file, codes := range fileCodes {
+		l := netlist.NewList()
+		for _, code := range codes {
 			if err := LoadFile(file, code, l); err != nil {
 				return nil, err
 			}
-			if l.Len() > 0 {
-				l.Sort()
-				v2gs.mg = append(v2gs.mg, l)
-			}
+		}
+		if l.Len() > 0 {
+			l.Sort()
+			mg = append(mg, l)
 		}
 	}
-	if args.Ips != nil {
-		err := ip_set.LoadFromIPs(args.Ips, l)
-		if err != nil {
+
+	if len(ips) > 0 {
+		l := netlist.NewList()
+		if err := ip_set.LoadFromIPs(ips, l); err != nil {
 			return nil, err
 		}
+		if l.Len() > 0 {
+			l.Sort()
+			mg = append(mg, l)
+		}
 	}
-	return v2gs, nil
+
+	return mg, nil
+}
+
+func (d *V2rayGeoip) startWatchers() {
+	fileSet := make(map[string]struct{})
+	for _, f := range d.files {
+		split := strings.Split(f, ":")
+		fileSet[split[0]] = struct{}{}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	d.cancel = cancel
+
+	for filePath := range fileSet {
+		path := filePath
+		go func() {
+			if err := geofile.WatchFile(ctx, d.logger, path, func() error {
+				return d.reload()
+			}); err != nil && err != context.Canceled {
+				d.logger.Error("file watcher stopped unexpectedly", zap.String("file", path), zap.Error(err))
+			}
+		}()
+	}
+}
+
+func (d *V2rayGeoip) reload() error {
+	newMg, err := loadGeoipMatchers(d.files, d.ips)
+	if err != nil {
+		return err
+	}
+
+	d.mu.Lock()
+	d.mg = newMg
+	d.mu.Unlock()
+	return nil
 }
 
 func LoadFile(file string, code string, l *netlist.List) error {

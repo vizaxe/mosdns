@@ -20,13 +20,17 @@
 package geosite
 
 import (
+	"context"
 	"fmt"
+	"strings"
+	"sync"
+
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/geofile"
 	"github.com/IrineSistiana/mosdns/v5/pkg/matcher/domain"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider"
 	"github.com/IrineSistiana/mosdns/v5/plugin/data_provider/domain_set"
-	"strings"
+	"go.uber.org/zap"
 )
 
 const PluginType = "geosite"
@@ -46,43 +50,118 @@ func Init(bp *coremain.BP, args any) (any, error) {
 type Args struct {
 	Files   []string `yaml:"files"`
 	Domains []string `yaml:"domains"`
+	Watch   bool     `yaml:"watch"`
 }
 
 var _ data_provider.DomainMatcherProvider = (*V2rayGeosite)(nil)
 
 type V2rayGeosite struct {
+	mu sync.RWMutex
 	mg []domain.Matcher[struct{}]
+
+	watch   bool
+	files   []string
+	domains []string
+	logger  *zap.Logger
+	cancel  context.CancelFunc
 }
 
 func (d *V2rayGeosite) GetDomainMatcher() domain.Matcher[struct{}] {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	return MatcherGroup(d.mg)
 }
 
 func NewV2rayGeosite(bp *coremain.BP, args *Args) (*V2rayGeosite, error) {
-	v2gs := &V2rayGeosite{}
+	v := &V2rayGeosite{
+		watch:   args.Watch,
+		files:   args.Files,
+		domains: args.Domains,
+		logger:  bp.L(),
+	}
 
-	m := domain.NewDomainMixMatcher()
+	mg, err := loadGeositeMatchers(args.Files, args.Domains)
+	if err != nil {
+		return nil, err
+	}
+	v.mg = mg
 
-	if args.Files != nil {
-		for _, file := range args.Files {
-			split := strings.Split(file, ":")
-			path := split[0]
-			code := split[1]
-			if err := LoadFile(path, code, m); err != nil {
+	if args.Watch {
+		v.startWatchers()
+	}
+
+	return v, nil
+}
+
+func loadGeositeMatchers(files []string, domains []string) ([]domain.Matcher[struct{}], error) {
+	var mg []domain.Matcher[struct{}]
+
+	fileCodes := make(map[string][]string)
+	for _, f := range files {
+		split := strings.Split(f, ":")
+		if len(split) != 2 {
+			return nil, fmt.Errorf("invalid file format %s, want path:code", f)
+		}
+		fileCodes[split[0]] = append(fileCodes[split[0]], split[1])
+	}
+
+	for file, codes := range fileCodes {
+		m := domain.NewDomainMixMatcher()
+		for _, code := range codes {
+			if err := LoadFile(file, code, m); err != nil {
 				return nil, err
 			}
-			if m.Len() > 0 {
-				v2gs.mg = append(v2gs.mg, m)
-			}
+		}
+		if m.Len() > 0 {
+			mg = append(mg, m)
 		}
 	}
-	if args.Domains != nil {
-		err := domain_set.LoadExps(args.Domains, m)
-		if err != nil {
+
+	if len(domains) > 0 {
+		m := domain.NewDomainMixMatcher()
+		if err := domain_set.LoadExps(domains, m); err != nil {
 			return nil, err
 		}
+		if m.Len() > 0 {
+			mg = append(mg, m)
+		}
 	}
-	return v2gs, nil
+
+	return mg, nil
+}
+
+func (d *V2rayGeosite) startWatchers() {
+	fileSet := make(map[string]struct{})
+	for _, f := range d.files {
+		split := strings.Split(f, ":")
+		fileSet[split[0]] = struct{}{}
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	d.cancel = cancel
+
+	for filePath := range fileSet {
+		path := filePath
+		go func() {
+			if err := geofile.WatchFile(ctx, d.logger, path, func() error {
+				return d.reload()
+			}); err != nil && err != context.Canceled {
+				d.logger.Error("file watcher stopped unexpectedly", zap.String("file", path), zap.Error(err))
+			}
+		}()
+	}
+}
+
+func (d *V2rayGeosite) reload() error {
+	newMg, err := loadGeositeMatchers(d.files, d.domains)
+	if err != nil {
+		return err
+	}
+
+	d.mu.Lock()
+	d.mg = newMg
+	d.mu.Unlock()
+	return nil
 }
 
 func LoadFile(file string, code string, m *domain.MixMatcher[struct{}]) error {
