@@ -88,12 +88,21 @@ func NewLeases(bp *coremain.BP, args *Args) (*Leases, error) {
 		l.cache = redisCache
 	}
 
-	go dnsmasq.WatchLeases(context.Background(), l.file, l.leaseChan)
-
-	firstBatch := <-l.leaseChan
-	l.leases = firstBatch
+	// 启动时立即读取一次文件，不依赖 inotify 事件
+	f, err := os.Open(args.File)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open dnsmasq lease file %s: %w", args.File, err)
+	}
+	initialLeases, err := dnsmasq.ReadLeases(f)
+	f.Close()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read dnsmasq lease file %s: %w", args.File, err)
+	}
+	l.leases = initialLeases
 	l.buildMatchers()
 
+	// 后台监听文件变更
+	go dnsmasq.WatchLeases(context.Background(), l.file, l.leaseChan)
 	go l.watch()
 	return l, nil
 }
