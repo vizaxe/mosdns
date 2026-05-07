@@ -99,6 +99,9 @@ func LoadFromIPsAndFiles(ips []string, fs []string, l *netlist.List) error {
 
 func LoadFromIPs(ips []string, l *netlist.List) error {
 	for i, s := range ips {
+		if len(s) == 0 {
+			continue
+		}
 		p, err := parseNetipPrefix(s)
 		if err != nil {
 			return fmt.Errorf("invalid ip #%d %s, %w", i, s, err)

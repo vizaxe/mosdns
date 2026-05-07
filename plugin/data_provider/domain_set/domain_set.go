@@ -92,6 +92,9 @@ func LoadExpsAndFiles(exps []string, fs []string, m *domain.MixMatcher[struct{}]
 
 func LoadExps(exps []string, m *domain.MixMatcher[struct{}]) error {
 	for i, exp := range exps {
+		if len(exp) == 0 {
+			continue
+		}
 		if err := m.Add(exp, struct{}{}); err != nil {
 			return fmt.Errorf("failed to load expression #%d %s, %w", i, exp, err)
 		}
