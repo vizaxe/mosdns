@@ -6,12 +6,14 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 )
 
 const maxEntrySize = 20 << 20 // 20MB, safe upper bound for a single entry
 
 func LoadIP(file, code string) ([]*CIDR, error) {
+	file = resolveDatFilePath(file)
 	entry, err := findEntry(file, []byte(strings.ToUpper(code)))
 	if err != nil {
 		return nil, err
@@ -24,6 +26,7 @@ func LoadIP(file, code string) ([]*CIDR, error) {
 }
 
 func LoadSite(file, code string) ([]*Domain, error) {
+	file = resolveDatFilePath(file)
 	entry, err := findEntry(file, []byte(strings.ToUpper(code)))
 	if err != nil {
 		return nil, err
@@ -33,6 +36,43 @@ func LoadSite(file, code string) ([]*Domain, error) {
 		return nil, err
 	}
 	return geosite.Domain, nil
+}
+
+func resolveDatFilePath(path string) string {
+	if path != "geoip" && path != "geosite" {
+		return path
+	}
+
+	fileName := path + ".dat"
+
+	if dir := os.Getenv("XRAY_LOCATION_ASSET"); dir != "" {
+		p := filepath.Join(dir, fileName)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+
+	if dir := os.Getenv("V2RAY_LOCATION_ASSET"); dir != "" {
+		p := filepath.Join(dir, fileName)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+
+	dirs := []string{
+		"/usr/local/share/xray",
+		"/usr/share/xray",
+		"/usr/local/share/v2ray",
+		"/usr/share/v2ray",
+	}
+	for _, dir := range dirs {
+		p := filepath.Join(dir, fileName)
+		if _, err := os.Stat(p); err == nil {
+			return p
+		}
+	}
+
+	return path
 }
 
 func findEntry(file string, code []byte) ([]byte, error) {
