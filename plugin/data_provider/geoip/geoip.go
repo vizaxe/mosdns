@@ -49,7 +49,6 @@ func Init(bp *coremain.BP, args any) (any, error) {
 }
 
 type Args struct {
-	Files []string `yaml:"files"`
 	Ips   []string `yaml:"ips"`
 	Watch bool     `yaml:"watch"`
 }
@@ -61,7 +60,6 @@ type V2rayGeoip struct {
 	mg []netlist.Matcher
 
 	watch  bool
-	files  []string
 	ips    []string
 	logger *zap.Logger
 	cancel context.CancelFunc
@@ -76,12 +74,11 @@ func (d *V2rayGeoip) GetIPMatcher() netlist.Matcher {
 func NewV2rayGeoip(bp *coremain.BP, args *Args) (*V2rayGeoip, error) {
 	v := &V2rayGeoip{
 		watch:  args.Watch,
-		files:  args.Files,
 		ips:    args.Ips,
 		logger: bp.L(),
 	}
 
-	mg, err := loadGeoipMatchers(args.Files, args.Ips)
+	mg, err := loadGeoipMatchers(args.Ips)
 	if err != nil {
 		return nil, err
 	}
@@ -94,16 +91,18 @@ func NewV2rayGeoip(bp *coremain.BP, args *Args) (*V2rayGeoip, error) {
 	return v, nil
 }
 
-func loadGeoipMatchers(files []string, ips []string) ([]netlist.Matcher, error) {
+func loadGeoipMatchers(ips []string) ([]netlist.Matcher, error) {
 	var mg []netlist.Matcher
 
 	fileCodes := make(map[string][]string)
-	for _, f := range files {
-		split := strings.Split(f, ":")
-		if len(split) != 2 {
-			return nil, fmt.Errorf("invalid file format %s, want path:code", f)
+	var ipEntries []string
+	for _, item := range ips {
+		if strings.Count(item, ":") == 1 {
+			split := strings.SplitN(item, ":", 2)
+			fileCodes[split[0]] = append(fileCodes[split[0]], split[1])
+		} else {
+			ipEntries = append(ipEntries, item)
 		}
-		fileCodes[split[0]] = append(fileCodes[split[0]], split[1])
 	}
 
 	for file, codes := range fileCodes {
@@ -119,9 +118,9 @@ func loadGeoipMatchers(files []string, ips []string) ([]netlist.Matcher, error) 
 		}
 	}
 
-	if len(ips) > 0 {
+	if len(ipEntries) > 0 {
 		l := netlist.NewList()
-		if err := ip_set.LoadFromIPs(ips, l); err != nil {
+		if err := ip_set.LoadFromIPs(ipEntries, l); err != nil {
 			return nil, err
 		}
 		if l.Len() > 0 {
@@ -135,9 +134,11 @@ func loadGeoipMatchers(files []string, ips []string) ([]netlist.Matcher, error) 
 
 func (d *V2rayGeoip) startWatchers() {
 	fileSet := make(map[string]struct{})
-	for _, f := range d.files {
-		split := strings.Split(f, ":")
-		fileSet[split[0]] = struct{}{}
+	for _, item := range d.ips {
+		if strings.Count(item, ":") == 1 {
+			split := strings.SplitN(item, ":", 2)
+			fileSet[split[0]] = struct{}{}
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -156,7 +157,7 @@ func (d *V2rayGeoip) startWatchers() {
 }
 
 func (d *V2rayGeoip) reload() error {
-	newMg, err := loadGeoipMatchers(d.files, d.ips)
+	newMg, err := loadGeoipMatchers(d.ips)
 	if err != nil {
 		return err
 	}

@@ -22,6 +22,7 @@ package utils
 import (
 	"github.com/mitchellh/mapstructure"
 	"golang.org/x/exp/constraints"
+	"reflect"
 	"strconv"
 )
 
@@ -50,6 +51,18 @@ func CheckNumRange[K constraints.Integer | constraints.Float](v, min, max K) boo
 	return true
 }
 
+// stringToStringSliceHook converts a single string to a slice of strings.
+// This allows config fields of type []string to accept both a single string
+// and a list of strings in YAML.
+func stringToStringSliceHook() mapstructure.DecodeHookFunc {
+	return func(f reflect.Type, t reflect.Type, data any) (any, error) {
+		if f.Kind() == reflect.String && t.Kind() == reflect.Slice && t.Elem().Kind() == reflect.String {
+			return []string{data.(string)}, nil
+		}
+		return data, nil
+	}
+}
+
 // WeakDecode decodes args from config to output.
 func WeakDecode(in any, output any) error {
 	config := &mapstructure.DecoderConfig{
@@ -57,6 +70,7 @@ func WeakDecode(in any, output any) error {
 		Result:           output,
 		WeaklyTypedInput: true,
 		TagName:          "yaml",
+		DecodeHook:       stringToStringSliceHook(),
 	}
 
 	decoder, err := mapstructure.NewDecoder(config)

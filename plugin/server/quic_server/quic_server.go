@@ -41,11 +41,11 @@ func init() {
 }
 
 type Args struct {
-	Entry       string `yaml:"entry"`
-	Listen      string `yaml:"listen"`
-	Cert        string `yaml:"cert"`
-	Key         string `yaml:"key"`
-	IdleTimeout int    `yaml:"idle_timeout"`
+	Entry       string   `yaml:"entry"`
+	Listen      []string `yaml:"listen"`
+	Cert        string   `yaml:"cert"`
+	Key         string   `yaml:"key"`
+	IdleTimeout int      `yaml:"idle_timeout"`
 }
 
 func (a *Args) init() {
@@ -54,12 +54,23 @@ func (a *Args) init() {
 
 type QuicServer struct {
 	args *Args
-
-	l *quic.Listener
+	ls   []*quic.Listener
+	ts   []*quic.Transport
 }
 
 func (s *QuicServer) Close() error {
-	return s.l.Close()
+	var err error
+	for _, l := range s.ls {
+		if e := l.Close(); e != nil {
+			err = e
+		}
+	}
+	for _, t := range s.ts {
+		if e := t.Close(); e != nil {
+			err = e
+		}
+	}
+	return err
 }
 
 func Init(bp *coremain.BP, args any) (any, error) {
@@ -84,11 +95,6 @@ func StartServer(bp *coremain.BP, args *Args) (*QuicServer, error) {
 	}
 	tlsConfig.NextProtos = []string{"doq"}
 
-	uc, err := net.ListenPacket("udp", args.Listen)
-	if err != nil {
-		return nil, fmt.Errorf("failed to listen socket, %w", err)
-	}
-
 	idleTimeout := time.Duration(args.IdleTimeout) * time.Second
 
 	quicConfig := &quic.Config{
@@ -107,26 +113,55 @@ func StartServer(bp *coremain.BP, args *Args) (*QuicServer, error) {
 	if err != nil {
 		logger.Warn("failed to init quic stateless reset key, it will be disabled", zap.Error(err))
 	}
-	qt := &quic.Transport{
-		Conn:              uc,
-		StatelessResetKey: (*quic.StatelessResetKey)(srk),
+
+	serverOpts := server.DoQServerOpts{Logger: bp.L(), IdleTimeout: idleTimeout}
+
+	var ls []*quic.Listener
+	var ts []*quic.Transport
+
+	for _, listenAddr := range args.Listen {
+		uc, err := net.ListenPacket("udp", listenAddr)
+		if err != nil {
+			for _, ll := range ls {
+				ll.Close()
+			}
+			for _, tt := range ts {
+				tt.Close()
+			}
+			return nil, fmt.Errorf("failed to listen socket on %s, %w", listenAddr, err)
+		}
+
+		qt := &quic.Transport{
+			Conn:              uc,
+			StatelessResetKey: (*quic.StatelessResetKey)(srk),
+		}
+
+		quicListener, err := qt.Listen(tlsConfig, quicConfig)
+		if err != nil {
+			qt.Close()
+			for _, ll := range ls {
+				ll.Close()
+			}
+			for _, tt := range ts {
+				tt.Close()
+			}
+			return nil, fmt.Errorf("failed to listen quic on %s, %w", listenAddr, err)
+		}
+		bp.L().Info("quic server started", zap.Stringer("addr", quicListener.Addr()))
+
+		ls = append(ls, quicListener)
+		ts = append(ts, qt)
+
+		go func(l *quic.Listener) {
+			defer l.Close()
+			err := server.ServeDoQ(l, dh, serverOpts)
+			bp.M().GetSafeClose().SendCloseSignal(err)
+		}(quicListener)
 	}
 
-	quicListener, err := qt.Listen(tlsConfig, quicConfig)
-	if err != nil {
-		qt.Close()
-		return nil, fmt.Errorf("failed to listen quic, %w", err)
-	}
-	bp.L().Info("quic server started", zap.Stringer("addr", quicListener.Addr()))
-
-	go func() {
-		defer quicListener.Close()
-		serverOpts := server.DoQServerOpts{Logger: bp.L(), IdleTimeout: idleTimeout}
-		err := server.ServeDoQ(quicListener, dh, serverOpts)
-		bp.M().GetSafeClose().SendCloseSignal(err)
-	}()
 	return &QuicServer{
 		args: args,
-		l:    quicListener,
+		ls:   ls,
+		ts:   ts,
 	}, nil
 }

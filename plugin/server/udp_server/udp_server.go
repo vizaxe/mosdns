@@ -29,7 +29,6 @@ import (
 
 	"github.com/IrineSistiana/mosdns/v5/coremain"
 	"github.com/IrineSistiana/mosdns/v5/pkg/server"
-	"github.com/IrineSistiana/mosdns/v5/pkg/utils"
 	"github.com/IrineSistiana/mosdns/v5/plugin/server/server_utils"
 )
 
@@ -40,24 +39,33 @@ func init() {
 }
 
 type Args struct {
-	Entry  string `yaml:"entry"`
-	Listen string `yaml:"listen"`
+	Entry  string   `yaml:"entry"`
+	Listen []string `yaml:"listen"`
 }
 
 func (a *Args) init() {
-	utils.SetDefaultString(&a.Listen, "127.0.0.1:53")
+	if len(a.Listen) == 0 {
+		a.Listen = []string{"127.0.0.1:53"}
+	}
 }
 
 type UdpServer struct {
-	args       *Args
-	c          net.PacketConn
-	listenPath string
+	args        *Args
+	cs          []net.PacketConn
+	listenPaths []string
 }
 
 func (s *UdpServer) Close() error {
-	err := s.c.Close()
-	if len(s.listenPath) > 0 {
-		os.Remove(s.listenPath)
+	var err error
+	for _, c := range s.cs {
+		if e := c.Close(); e != nil {
+			err = e
+		}
+	}
+	for _, p := range s.listenPaths {
+		if len(p) > 0 {
+			os.Remove(p)
+		}
 	}
 	return err
 }
@@ -72,41 +80,54 @@ func StartServer(bp *coremain.BP, args *Args) (*UdpServer, error) {
 		return nil, fmt.Errorf("failed to init dns handler, %w", err)
 	}
 
-	listenerNetwork := "udp"
-	if strings.HasPrefix(args.Listen, "@") || strings.HasPrefix(args.Listen, "/") {
-		listenerNetwork = "unixgram"
-	}
+	var cs []net.PacketConn
+	var listenPaths []string
 
-	var listenPath string
-	if listenerNetwork == "unixgram" && strings.HasPrefix(args.Listen, "/") {
-		listenPath = args.Listen
-		os.Remove(listenPath)
-	}
-
-	socketOpt := server_utils.ListenerSocketOpts{
-		SO_REUSEPORT: true,
-		SO_RCVBUF:    64 * 1024,
-	}
-	lc := net.ListenConfig{Control: server_utils.ListenerControl(socketOpt)}
-
-	c, err := lc.ListenPacket(context.Background(), listenerNetwork, args.Listen)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create socket, %w", err)
-	}
-	bp.L().Info("udp server started", zap.Stringer("addr", c.LocalAddr()))
-
-	go func() {
-		defer c.Close()
-		if listenerNetwork == "unixgram" {
-			err = server.ServeUnix(c.(*net.UnixConn), dh, server.UDPServerOpts{Logger: bp.L()})
-		} else {
-			err = server.ServeUDP(c.(*net.UDPConn), dh, server.UDPServerOpts{Logger: bp.L()})
+	for _, listenAddr := range args.Listen {
+		listenerNetwork := "udp"
+		if strings.HasPrefix(listenAddr, "@") || strings.HasPrefix(listenAddr, "/") {
+			listenerNetwork = "unixgram"
 		}
-		bp.M().GetSafeClose().SendCloseSignal(err)
-	}()
+
+		var listenPath string
+		if listenerNetwork == "unixgram" && strings.HasPrefix(listenAddr, "/") {
+			listenPath = listenAddr
+			os.Remove(listenPath)
+		}
+
+		socketOpt := server_utils.ListenerSocketOpts{
+			SO_REUSEPORT: true,
+			SO_RCVBUF:    64 * 1024,
+		}
+		lc := net.ListenConfig{Control: server_utils.ListenerControl(socketOpt)}
+
+		c, err := lc.ListenPacket(context.Background(), listenerNetwork, listenAddr)
+		if err != nil {
+			for _, cc := range cs {
+				cc.Close()
+			}
+			return nil, fmt.Errorf("failed to create socket on %s, %w", listenAddr, err)
+		}
+		bp.L().Info("udp server started", zap.Stringer("addr", c.LocalAddr()))
+
+		cs = append(cs, c)
+		listenPaths = append(listenPaths, listenPath)
+
+		go func(c net.PacketConn, network string) {
+			defer c.Close()
+			var serveErr error
+			if network == "unixgram" {
+				serveErr = server.ServeUnix(c.(*net.UnixConn), dh, server.UDPServerOpts{Logger: bp.L()})
+			} else {
+				serveErr = server.ServeUDP(c.(*net.UDPConn), dh, server.UDPServerOpts{Logger: bp.L()})
+			}
+			bp.M().GetSafeClose().SendCloseSignal(serveErr)
+		}(c, listenerNetwork)
+	}
+
 	return &UdpServer{
-		args:       args,
-		c:          c,
-		listenPath: listenPath,
+		args:        args,
+		cs:          cs,
+		listenPaths: listenPaths,
 	}, nil
 }

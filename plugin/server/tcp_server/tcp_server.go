@@ -42,28 +42,37 @@ func init() {
 }
 
 type Args struct {
-	Entry       string `yaml:"entry"`
-	Listen      string `yaml:"listen"`
-	Cert        string `yaml:"cert"`
-	Key         string `yaml:"key"`
-	IdleTimeout int    `yaml:"idle_timeout"`
+	Entry       string   `yaml:"entry"`
+	Listen      []string `yaml:"listen"`
+	Cert        string   `yaml:"cert"`
+	Key         string   `yaml:"key"`
+	IdleTimeout int      `yaml:"idle_timeout"`
 }
 
 func (a *Args) init() {
-	utils.SetDefaultString(&a.Listen, "127.0.0.1:53")
+	if len(a.Listen) == 0 {
+		a.Listen = []string{"127.0.0.1:53"}
+	}
 	utils.SetDefaultNum(&a.IdleTimeout, 10)
 }
 
 type TcpServer struct {
-	args       *Args
-	l          net.Listener
-	listenPath string
+	args        *Args
+	ls          []net.Listener
+	listenPaths []string
 }
 
 func (s *TcpServer) Close() error {
-	err := s.l.Close()
-	if len(s.listenPath) > 0 {
-		os.Remove(s.listenPath)
+	var err error
+	for _, l := range s.ls {
+		if e := l.Close(); e != nil {
+			err = e
+		}
+	}
+	for _, p := range s.listenPaths {
+		if len(p) > 0 {
+			os.Remove(p)
+		}
 	}
 	return err
 }
@@ -92,39 +101,49 @@ func StartServer(bp *coremain.BP, args *Args) (*TcpServer, error) {
 		SO_RCVBUF:    64 * 1024,
 	}
 	lc := net.ListenConfig{Control: server_utils.ListenerControl(socketOpt)}
-	listenerNetwork := "tcp"
-	if strings.HasPrefix(args.Listen, "@") {
-		listenerNetwork = "unix"
-	}
-	if strings.HasPrefix(args.Listen, "/") {
-		listenerNetwork = "unix"
-	}
 
-	var listenPath string
-	if listenerNetwork == "unix" && strings.HasPrefix(args.Listen, "/") {
-		listenPath = args.Listen
-		os.Remove(listenPath)
-	}
+	serverOpts := server.TCPServerOpts{Logger: bp.L(), IdleTimeout: time.Duration(args.IdleTimeout) * time.Second}
 
-	l, err := lc.Listen(context.Background(), listenerNetwork, args.Listen)
-	if err != nil {
-		return nil, fmt.Errorf("failed to listen socket, %w", err)
-	}
-	if tc != nil {
-		l = tls.NewListener(l, tc)
-	}
-	bp.L().Info("tcp server started", zap.Stringer("addr", l.Addr()), zap.Bool("tls", tc != nil))
+	var ls []net.Listener
+	var listenPaths []string
 
-	go func() {
-		defer l.Close()
-		serverOpts := server.TCPServerOpts{Logger: bp.L(), IdleTimeout: time.Duration(args.IdleTimeout) * time.Second}
-		err := server.ServeTCP(l, dh, serverOpts)
-		bp.M().GetSafeClose().SendCloseSignal(err)
-	}()
+	for _, listenAddr := range args.Listen {
+		listenerNetwork := "tcp"
+		if strings.HasPrefix(listenAddr, "@") || strings.HasPrefix(listenAddr, "/") {
+			listenerNetwork = "unix"
+		}
+
+		var listenPath string
+		if listenerNetwork == "unix" && strings.HasPrefix(listenAddr, "/") {
+			listenPath = listenAddr
+			os.Remove(listenPath)
+		}
+
+		l, err := lc.Listen(context.Background(), listenerNetwork, listenAddr)
+		if err != nil {
+			for _, ll := range ls {
+				ll.Close()
+			}
+			return nil, fmt.Errorf("failed to listen socket on %s, %w", listenAddr, err)
+		}
+		if tc != nil {
+			l = tls.NewListener(l, tc)
+		}
+		bp.L().Info("tcp server started", zap.Stringer("addr", l.Addr()), zap.Bool("tls", tc != nil))
+
+		ls = append(ls, l)
+		listenPaths = append(listenPaths, listenPath)
+
+		go func(l net.Listener) {
+			defer l.Close()
+			err := server.ServeTCP(l, dh, serverOpts)
+			bp.M().GetSafeClose().SendCloseSignal(err)
+		}(l)
+	}
 
 	return &TcpServer{
-		args:       args,
-		l:          l,
-		listenPath: listenPath,
+		args:        args,
+		ls:          ls,
+		listenPaths: listenPaths,
 	}, nil
 }

@@ -17,7 +17,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
-package tcp_server
+package http_server
 
 import (
 	"context"
@@ -47,11 +47,11 @@ type Args struct {
 		Exec string `yaml:"exec"`
 		Path string `yaml:"path"`
 	} `yaml:"entries"`
-	Listen      string `yaml:"listen"`
-	SrcIPHeader string `yaml:"src_ip_header"`
-	Cert        string `yaml:"cert"`
-	Key         string `yaml:"key"`
-	IdleTimeout int    `yaml:"idle_timeout"`
+	Listen      []string `yaml:"listen"`
+	SrcIPHeader string   `yaml:"src_ip_header"`
+	Cert        string   `yaml:"cert"`
+	Key         string   `yaml:"key"`
+	IdleTimeout int      `yaml:"idle_timeout"`
 }
 
 func (a *Args) init() {
@@ -59,15 +59,17 @@ func (a *Args) init() {
 }
 
 type HttpServer struct {
-	args       *Args
-	server     *http.Server
-	listenPath string
+	args        *Args
+	server      *http.Server
+	listenPaths []string
 }
 
 func (s *HttpServer) Close() error {
 	err := s.server.Close()
-	if len(s.listenPath) > 0 {
-		os.Remove(s.listenPath)
+	for _, p := range s.listenPaths {
+		if len(p) > 0 {
+			os.Remove(p)
+		}
 	}
 	return err
 }
@@ -97,25 +99,33 @@ func StartServer(bp *coremain.BP, args *Args) (*HttpServer, error) {
 	}
 	lc := net.ListenConfig{Control: server_utils.ListenerControl(socketOpt)}
 
-	listenerNetwork := "tcp"
-	if strings.HasPrefix(args.Listen, "@") {
-		listenerNetwork = "unix"
-	}
-	if strings.HasPrefix(args.Listen, "/") {
-		listenerNetwork = "unix"
-	}
+	var ls []net.Listener
+	var listenPaths []string
 
-	var listenPath string
-	if listenerNetwork == "unix" && strings.HasPrefix(args.Listen, "/") {
-		listenPath = args.Listen
-		os.Remove(listenPath)
-	}
+	for _, listenAddr := range args.Listen {
+		listenerNetwork := "tcp"
+		if strings.HasPrefix(listenAddr, "@") || strings.HasPrefix(listenAddr, "/") {
+			listenerNetwork = "unix"
+		}
 
-	l, err := lc.Listen(context.Background(), listenerNetwork, args.Listen)
-	if err != nil {
-		return nil, fmt.Errorf("failed to listen socket, %w", err)
+		var listenPath string
+		if listenerNetwork == "unix" && strings.HasPrefix(listenAddr, "/") {
+			listenPath = listenAddr
+			os.Remove(listenPath)
+		}
+
+		l, err := lc.Listen(context.Background(), listenerNetwork, listenAddr)
+		if err != nil {
+			for _, ll := range ls {
+				ll.Close()
+			}
+			return nil, fmt.Errorf("failed to listen socket on %s, %w", listenAddr, err)
+		}
+		bp.L().Info("http server started", zap.Stringer("addr", l.Addr()))
+
+		ls = append(ls, l)
+		listenPaths = append(listenPaths, listenPath)
 	}
-	bp.L().Info("http server started", zap.Stringer("addr", l.Addr()))
 
 	hs := &http.Server{
 		Handler:        mux,
@@ -129,21 +139,26 @@ func StartServer(bp *coremain.BP, args *Args) (*HttpServer, error) {
 		MaxUploadBufferPerConnection: 65535,
 		MaxUploadBufferPerStream:     65535,
 	}); err != nil {
+		for _, ll := range ls {
+			ll.Close()
+		}
 		return nil, fmt.Errorf("failed to setup http2 server, %w", err)
 	}
 
-	go func() {
-		var err error
-		if len(args.Key)+len(args.Cert) > 0 {
-			err = hs.ServeTLS(l, args.Cert, args.Key)
-		} else {
-			err = hs.Serve(l)
-		}
-		bp.M().GetSafeClose().SendCloseSignal(err)
-	}()
+	for _, l := range ls {
+		go func(l net.Listener) {
+			var err error
+			if len(args.Key)+len(args.Cert) > 0 {
+				err = hs.ServeTLS(l, args.Cert, args.Key)
+			} else {
+				err = hs.Serve(l)
+			}
+			bp.M().GetSafeClose().SendCloseSignal(err)
+		}(l)
+	}
 	return &HttpServer{
-		args:       args,
-		server:     hs,
-		listenPath: listenPath,
+		args:        args,
+		server:      hs,
+		listenPaths: listenPaths,
 	}, nil
 }

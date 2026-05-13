@@ -48,7 +48,6 @@ func Init(bp *coremain.BP, args any) (any, error) {
 }
 
 type Args struct {
-	Files   []string `yaml:"files"`
 	Domains []string `yaml:"domains"`
 	Watch   bool     `yaml:"watch"`
 }
@@ -60,7 +59,6 @@ type V2rayGeosite struct {
 	mg []domain.Matcher[struct{}]
 
 	watch   bool
-	files   []string
 	domains []string
 	logger  *zap.Logger
 	cancel  context.CancelFunc
@@ -75,12 +73,11 @@ func (d *V2rayGeosite) GetDomainMatcher() domain.Matcher[struct{}] {
 func NewV2rayGeosite(bp *coremain.BP, args *Args) (*V2rayGeosite, error) {
 	v := &V2rayGeosite{
 		watch:   args.Watch,
-		files:   args.Files,
 		domains: args.Domains,
 		logger:  bp.L(),
 	}
 
-	mg, err := loadGeositeMatchers(args.Files, args.Domains)
+	mg, err := loadGeositeMatchers(args.Domains)
 	if err != nil {
 		return nil, err
 	}
@@ -93,16 +90,23 @@ func NewV2rayGeosite(bp *coremain.BP, args *Args) (*V2rayGeosite, error) {
 	return v, nil
 }
 
-func loadGeositeMatchers(files []string, domains []string) ([]domain.Matcher[struct{}], error) {
+func loadGeositeMatchers(domains []string) ([]domain.Matcher[struct{}], error) {
 	var mg []domain.Matcher[struct{}]
 
 	fileCodes := make(map[string][]string)
-	for _, f := range files {
-		split := strings.Split(f, ":")
-		if len(split) != 2 {
-			return nil, fmt.Errorf("invalid file format %s, want path:code", f)
+	var exps []string
+	for _, item := range domains {
+		if !strings.Contains(item, ":") {
+			exps = append(exps, item)
+			continue
 		}
-		fileCodes[split[0]] = append(fileCodes[split[0]], split[1])
+		split := strings.SplitN(item, ":", 2)
+		switch split[0] {
+		case "domain", "full", "regex", "keyword":
+			exps = append(exps, item)
+		default:
+			fileCodes[split[0]] = append(fileCodes[split[0]], split[1])
+		}
 	}
 
 	for file, codes := range fileCodes {
@@ -117,9 +121,9 @@ func loadGeositeMatchers(files []string, domains []string) ([]domain.Matcher[str
 		}
 	}
 
-	if len(domains) > 0 {
+	if len(exps) > 0 {
 		m := domain.NewDomainMixMatcher()
-		if err := domain_set.LoadExps(domains, m); err != nil {
+		if err := domain_set.LoadExps(exps, m); err != nil {
 			return nil, err
 		}
 		if m.Len() > 0 {
@@ -132,9 +136,16 @@ func loadGeositeMatchers(files []string, domains []string) ([]domain.Matcher[str
 
 func (d *V2rayGeosite) startWatchers() {
 	fileSet := make(map[string]struct{})
-	for _, f := range d.files {
-		split := strings.Split(f, ":")
-		fileSet[split[0]] = struct{}{}
+	for _, item := range d.domains {
+		if !strings.Contains(item, ":") {
+			continue
+		}
+		split := strings.SplitN(item, ":", 2)
+		switch split[0] {
+		case "domain", "full", "regex", "keyword":
+		default:
+			fileSet[split[0]] = struct{}{}
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -153,7 +164,7 @@ func (d *V2rayGeosite) startWatchers() {
 }
 
 func (d *V2rayGeosite) reload() error {
-	newMg, err := loadGeositeMatchers(d.files, d.domains)
+	newMg, err := loadGeositeMatchers(d.domains)
 	if err != nil {
 		return err
 	}
