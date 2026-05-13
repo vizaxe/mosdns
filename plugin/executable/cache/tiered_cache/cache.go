@@ -159,18 +159,17 @@ func (t *TieredCache) asyncUpdate(q *dns.Msg, next sequence.ChainWalker) {
 	lazyUpdateFunc := func() (any, error) {
 		defer t.lazyUpdateSF.Forget(key)
 
-		ctx, cancel := context.WithTimeout(context.Background(), defaultAsyncUpdateTimeout)
-		defer cancel()
-
 		var lastErr error
 		for i := 0; i <= t.args.RetryCount; i++ {
 			if i > 0 {
 				time.Sleep(time.Duration(100*(1<<uint(i-1))) * time.Millisecond)
 			}
 
+			retryCtx, retryCancel := context.WithTimeout(context.Background(), defaultAsyncUpdateTimeout)
 			retryNext := next
 			qCtx := query_context.NewContext(qCopy)
-			err := retryNext.ExecNext(ctx, qCtx)
+			err := retryNext.ExecNext(retryCtx, qCtx)
+			retryCancel()
 			if err != nil {
 				lastErr = err
 				t.bp.L().Warn("tiered_cache 异步更新失败",
